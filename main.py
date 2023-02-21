@@ -1,62 +1,118 @@
-from opals import Import, Export
+from opals import Import, Export, Bounds
 from opals import TerrainFilter as tf
 from opals.AddInfo import AddInfo
-import DM_tools
+import DM_tools, my_tools
 import numpy as np
 import DM_o3d_Visualize
 import open3d as o3d
 
-import sys
+
+import geopandas as gpd
+import os, glob
 
 if __name__ == '__main__':
 
-    folder = '/home/reuma/ownCloud_TU/data/Pielach/Laser/VQ-880-G/'
-    file = '115357_0'
-    odm =  file + '.odm'
+    base_dir = r'../2021-03-09-VQ-880-GH/'
+    shp_folder = os.path.join(base_dir,  'shpfiles/')
+    odm_folder = os.path.join(base_dir,  'odm/')
 
+    files = glob.glob(base_dir + '*.laz')
+    intersection_files = []
+
+    filterize = True # for debugging purposes
+
+    # filterization parameters
+    filter2 = tf.TerrainFilter()
+    filter2.robustInterpolation.gridSize = 0.3
+    filtered_folder = os.path.join(base_dir, f'filtered_{filter2.robustInterpolation.gridSize}/')
+
+    z_thresh_up = 263 # z higher than this value will be filterized
+    z_thresh_down = 257 # z lower than this value will be filterized
     # define output format
     exp = Export.Export()
     exp.oFormat = 'LAS_1.4_2Classes.xml'
 
-    filterize=False
+    boulders_bounds = gpd.read_file(shp_folder + 'boulders.shp')  # bounds by Gottfried (known bounds)
 
-    if filterize:
-        Import.Import(inFile=folder+file+'.laz', outFile=odm).run()
+    # create odm and bounds file for all las/laz
+    #---------------------------------------------
+    for base_file in files:
+        print(f'Check boundaries files for {os.path.basename(base_file)}')
+        if not os.path.exists(odm_folder):
+            os.makedirs(odm_folder)
 
-        # reverse z to filter out point under the ground
-        # DM_tools.reverseZ(odm)
-        # filter1 = tf.TerrainFilter()
-        # # filter1.robustInterpolation.filterThresholds = [0.06, 0.1, 0.5]
-        # filter1.robustInterpolation.gridSize = 0.1
-        # # filter1.robustInterpolation.gridSize = 0.1
-        # filter1.inFile = odm
-        # filter1.run()
+        filename = os.path.basename(base_file)[:-4]
+        odm =  os.path.join(odm_folder, filename + '.odm')
+        shp =  os.path.join(shp_folder, filename + '.shp')
 
-        # initialize classification
-        AddInfo(inFile=odm, attribute='_Classification1=Classification').run()
-        AddInfo(inFile=odm, attribute='Classification=0*Classification').run()
+        # check if bounds file exist (if it is, there is an odm)
+        if os.path.isfile(shp):
+            continue
+        print(f"Create boundaries file for {os.path.basename(base_file)})")
+        Import.Import(inFile= base_file, outFile=odm).run()
+        Bounds.Bounds(odm, shp).run()
 
-        # return z upwards and filter terrain again
-        # DM_tools.reverseZ(odm)
-        filter2 = tf.TerrainFilter()
-        filter2.robustInterpolation.gridSize = 0.25
-        filter2.inFile = odm
-        filter2.run()
+    # check intersections between odm and known anomalies
+    files_odm = glob.glob(odm_folder + '/*.odm')
+    for odm in files_odm:
+        filename = os.path.basename(odm)[:-4]
+        shpfile = shp_folder + filename + '.shp'
+        # 2. check intersections
+        try:
+            las_bounds = gpd.GeoDataFrame.from_file(shpfile)  # bounds of the las file
+        except:
+            Bounds.Bounds(odm, shp).run()
 
-    pcd, np_dict = DM_tools.odm2o3d(odm, attributes_dict=['Classification', ])
-    pts = np.asarray(pcd.points)
-    pcd_filtered = o3d.geometry.PointCloud()
-    pcd_filtered.points = o3d.utility.Vector3dVector(pts[np_dict['Classification']==2, :])
-    voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd_filtered,
-                                                                voxel_size=0.2)
-    o3d.visualization.draw_geometries([voxel_grid])
-    # pcd.colors = np_dict['Classification']
-    # DM_o3d_Visualize.VisualizeODM().visualize_odm(odm, attributes_list=['Classification'])
+        cboulders = []  # current boulders
+        for index1, boulder in boulders_bounds.iterrows():
+            for index2, las_bound in las_bounds.iterrows():
+                if boulder['geometry'].intersects(las_bound['geometry']):
+                    cboulders.append({'geometry': boulder['geometry'].intersects(las_bound['geometry'])})
+                    intersection_files.append(filename)
 
-    # save to las
-    exp.outFile = folder + file + '_filtered.las'
-    exp.inFile = odm
-    exp.run()
+        if filterize:
+            print(f"fliterize {base_file}")
+            # initialize classification
+            AddInfo(inFile=odm, attribute='_Classification1=Classification').run()
+            AddInfo(inFile=odm, attribute='Classification=0*Classification').run()
+
+
+            # filter2.robustInterpolation.filterThresholds = [.25 ,.5, 1, 1.5]
+            # filter2.robustInterpolation.lowerThresholdScale = -1
+            filter2.inFile = odm
+            filter2.run()
+
+        pcd, np_dict = DM_tools.odm2o3d(odm, attributes_dict=['Classification', ])
+        pts = np.asarray(pcd.points)
+        pts_filtered = pts[np_dict['Classification']==2, :]
+
+        # filter by height
+        ind_up = pts_filtered[:,2]< z_thresh_up
+        pts_filtered = pts_filtered[ind_up, :]
+        ind_down = pts_filtered[:, 2] > z_thresh_down
+        pts_filtered = pts_filtered[ ind_down, :]
+
+        pcd_filtered = o3d.geometry.PointCloud()
+        pcd_filtered.points = o3d.utility.Vector3dVector(pts_filtered)
+        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd_filtered,
+                                                                    voxel_size=0.2)
+        o3d.visualization.draw_geometries([pcd_filtered])
+        # pcd.colors = o3d.utility.Vector3dVector(np_dict['Classification'])
+        # DM_o3d_Visualize.VisualizeODM().visualize_odm(odm, attributes_list=['Classification'])
+
+        new_las = my_tools.create_las(pts_filtered)
+
+        if not os.path.exists(filtered_folder):
+            os.makedirs(filtered_folder)
+
+        new_las.write(os.path.join(filtered_folder,
+                                   f"{os.path.basename(base_file)[:-4]}.las"))
+        # # save to las
+        # exp.outFile = base_file + '_filtered.las'
+        # exp.inFile = odm
+        # exp.run()
+
+
 
     print('Done!')
 

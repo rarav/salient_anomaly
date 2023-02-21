@@ -157,6 +157,95 @@ def odm2o3d(odm, attributes_dict=None, print_attributes=False):
 
     return pcd, np_dict
 
+def o3d2odm(points, odm, attributes_dict=None, print_attributes=False):
+    """
+    Converts odm to open3d using the coordinates as coordinates
+    Other features are returned as numpy dict, if required in attributes_dict
+
+    :param points: points to convert to the odm
+    :param odm: path to the odm
+    :param attributes_dict: attributes of interest that should be converted
+    :param print_attributes: print all attributes in the odm
+
+    :type odm: str
+    :type attributes_dict: dict (of strings)
+    :type print_attributes: bool
+
+    :return: open3d pcl object, numpy dict of the desired attributes
+    """
+    import open3d as o3d
+
+    # pyDM.Datamanager.load parameter: filename(string), readOnly(bool) threadSafety(bool)
+    dm = pyDM.Datamanager.load(odm, False, False)
+    if not dm:
+        print("Unable to open ODM '" + odm + "'")
+        dm = pyDM.Datamanager.create(odm, False)
+        if not dm:
+            print("Unable to create ODM '" + odm + "'")
+            sys.exit(1)
+
+    # build layout for retrieving echo width values (subset of odm attributes)
+    lf = pyDM.AddInfoLayoutFactory()
+    for att in attributes_dict.key():
+        lf.addColumn(pyDM.ColumnType.float_, att)
+
+    layoutRead = lf.getLayout()
+    layoutWrite = lf.getLayout()
+
+    print("Get odm echo width as numpy object...")
+    # create dictionary of numpy objects
+    numpyDict = pyDM.NumpyConverter.createNumpyDict(dm.sizePoint(), layoutRead, False)
+    print("len(numpyDict)=", len(numpyDict))
+    pointindex = dm.getPointIndex()
+
+    # fill numpy dictionary with all leafs of the ODM point index
+    rowIdx = 0
+    count = float(pointindex.sizeLeaf())
+    for idx, leaf in enumerate(pointindex.leafs()):
+        print("%5.1f%% finished" % (idx / count * 100.))
+        rowIdx += pyDM.NumpyConverter.fillNumpyDict(numpyDict, rowIdx, leaf)
+
+    print("100.0% finished.", rowIdx, "values have been converted")
+
+    print("\nCompute min max echo width for single echos using numpy...")
+    mask = numpyDict["NrOfEchos"] == 1  # generate single echo mask
+    minValue = (numpyDict["EchoWidth"][mask]).min()
+    maxValue = (numpyDict["EchoWidth"][mask]).max()
+    print("\tmin=%.2f" % minValue)
+    print("\tmax=%.2f" % maxValue)
+
+    # compute parameter of linear transform function
+    k = 1. / (maxValue - minValue)
+    d = -minValue * k
+    normalizedEchoWidth = numpyDict["EchoWidth"] * k + d
+
+    # check if linear transform function
+    minCheck = (normalizedEchoWidth[mask]).min();
+    assert abs(minCheck) < 1e-10
+    maxCheck = (normalizedEchoWidth[mask]).max();
+    assert abs(maxCheck - 1) < 1e-10
+
+    # store normalized echo width values within the odm
+    storeDict = {}
+    storeDict["_normalizedEchoWidth"] = normalizedEchoWidth
+    print("\nStore normalised echo width values in ODM...")
+    for idx, leaf in enumerate(pointindex.leafs()):
+        print("%5.1f%% finished" % (idx / count * 100.))
+
+        # pyDM.NumpyConverter.setFromNumpyDict( numpyDict, translators, leaf, layout, filter = None)
+        # for details on the function, please refer to the docu
+        pyDM.NumpyConverter.setFromNumpyDict(storeDict, [], leaf, layoutWrite)  # we don't need translators in this case
+
+        # mark leaf as changed/dirty that it will be written do disk again
+        leaf.setChanged(True)
+
+    print("100.0% finished.")
+
+    print("\nSave odm...")
+    dm.save()
+    print("finished")
+
+
 def reverseZ(odm):
     """
     Reverses Z ordinate (saves to the same odm)

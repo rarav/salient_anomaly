@@ -1,9 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import open3d as o3d
-from opals import pyDM
 from itertools import cycle
-
 
 class VisualizeODM:
 
@@ -97,6 +95,8 @@ class VisualizeODM:
         """
 
         import DM_tools
+
+
         self.pcd, np_dict = DM_tools.odm2o3d(odm, attributes_list)
 
         key_to_callback = self.initialize_key_to_callback()
@@ -105,9 +105,10 @@ class VisualizeODM:
 
         key_to_callback[ord('A')] = self.toggle_attributes_colors
         key_to_callback[ord('C')] = self.toggle_colormaps
-
-        o3d.visualization.draw_geometries_with_key_callbacks([self.pcd], key_to_callback)
-
+        # o3d.visualization.draw_geometries_with_editing([self.pcd])
+        # o3d.visualization.draw_geometries_with_key_callbacks([self.pcd], key_to_callback)
+        # vis = o3d.visualization.gui()
+        # o3d.visualization.O3DVisualizer().add_geometry("try", self.pcd)
     def __prepare_attributes(self, attributes_dict):
         """
         Prepares property for coloring
@@ -161,8 +162,8 @@ class VisualizeODM:
         self.cm = plt.get_cmap(colorname)
 
         new_colors = self.__apply_colormap(np.asarray(self.colors)[self.index])
-        self.pointset.data.colors = new_colors
-        vis.update_geometry(self.pointset.data)
+        self.pcd.colors = new_colors
+        vis.update_geometry(self.pcd)
 
     def __apply_colormap(self, array):
         """
