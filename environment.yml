@@ -1,0 +1,26 @@
+# conda env create -f environment.yml
+
+name: saly
+channels:
+  - pytorch
+  - conda-forge
+  #- open3d-admin
+dependencies:
+  - conda-forge::python=3.9.*
+  - conda-forge::python_abi=3.9.* *_cp39
+  - conda-forge::plyfile
+  - conda-forge::tqdm
+  - conda-forge::pandas
+  - conda-forge::addict
+  - conda-forge::jupyter
+  - conda-forge::jupyterlab
+  - conda-forge::pyyaml
+  - conda-forge::scikit-learn
+  - conda-forge::pip
+  - conda-forge::laspy>=2.0.0
+  - conda-forge::numba=0.56.*
+  - conda-forge::matplotlib=3.7
+  - conda-forge::cudatoolkit=11.3
+  - pytorch::pytorch=1.10.0
+  #- open3d-admin:open3d=0.15.1
+

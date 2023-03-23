@@ -1,0 +1,382 @@
+import os, datetime, sys, time
+from os.path import exists, join as pjoin
+
+import torch
+
+import config
+import model
+from datamanagement import TrainingDataset
+from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
+import torch.nn as nn
+from torch import optim
+from functools import partial
+from tools import *
+
+
+class ExperimentHandler:
+    net: nn.Module  # ------------------ networks ["seg":segmentation, "gen":generator, "dis":discriminator, ...]
+    opt: object  # --------------------- corresponding optimizers (same keys as nets)
+    cf: config.Config  # --------------- configuration object (see args.py)
+    e: int  # -------------------------- current epoch (int)
+    e_run: int  # ---------------------- num. of trained epochs in run (different from e if training was interrupted)
+    e_es: int  # ----------------------- num. of epochs since model improvement (e.g. increase of validation score)
+    F: FolderDict  # ------------------- dictionary of folders for saving/loading
+    top_scores: dict  # ---------------- dictionary of best scores
+    train_start_time: float  # --------- training start time
+    epoch_start_time: float  # --------- start time of current epoch
+    device: str  # --------------------- device to use ('cpu' or 'cuda')
+
+    tds: Dataset
+    tdl: DataLoader
+
+    # val_dataset: EvalDataset
+    # val_data_loader: DataLoader
+    # tes_dataset: EvalDataset
+    # tes_data_loader: DataLoader
+
+    # ============================================================================================================ INIT
+
+    def __init__(self, cf: config.Config):
+        """Create ExperimentHandler based on configuration object.
+
+        Initializes ExperimentHandler and corresponding attributes. Sets up folder structure and auxiliary variables.
+        :param cf: Configuration object.
+        """
+        self.cf = cf
+        print(f'\n\033[31m{cf.OUTPUTS.FOLDER}\033[0m\n')
+        self.make_output_folders()
+        self.store_config()
+        self.init_cuda()
+        self.init_aux_vars()
+
+    def make_output_folders(self):
+        """Create folders for storing results.
+
+        When using folder dicts, the corresponding folders are created on the first usage.
+        This prevents creating unused folders.
+        """
+        root = self.cf.OUTPUTS.FOLDER
+        os.makedirs(root, exist_ok=True)
+        self.F = FolderDict({
+            'metrics': pjoin(root, 'confusion_matrices'), 'checkpoints': pjoin(root, 'checkpoints'),
+            'train': pjoin(root, 'images/0_training'), 'validation': pjoin(root, 'images/1_validation'),
+            'testing': pjoin(root, 'images/2_testing'),
+        })
+
+    def store_config(self):
+        """Stores the full yaml file including inherited attributes to the output folder.
+
+        The stored yaml file may be reused to repeat an experiment.
+        """
+        now_s = current_datetime_as_str() + '.yaml'
+        with open(pjoin(self.cf.OUTPUTS.FOLDER, now_s), 'w+') as f:
+            f.write(f"# python main.py {' '.join(sys.argv[1:])}\n")
+            f.write(str(self.cf))
+
+    def init_cuda(self):
+        """Defines which GPU should be used.
+
+        Switches to CPU if cf.CUDA = -1 or if no GPU is available.
+        """
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(self.cf.CUDA)
+        if torch.cuda.is_available() and int(self.cf.CUDA) >= 0:
+            print(f'Using GPU nr. {self.cf.CUDA}: {torch.cuda.get_device_name(0)}')
+            self.device = 'cuda'
+            torch.cuda.empty_cache()
+        else:
+            print('Using CPU only!')
+            self.device = 'cpu'
+
+    def init_aux_vars(self):
+        """Sets up all auxiliary variables.
+
+        Auxiliary variables are used for computing/storing metrics, tracking epoch, compute weighted loss.
+        Note that the confusion matrix (self.CM) is reused multiple times.
+        """
+        self.e, self.e_es = -1, -1
+        self.train_start_time = -1.0
+        self.top_scores = {'training': 0.0, 'validation': 0.0, 'testing': 0.0}
+
+    # =============================================================================================== EXPERIMENT SETUPS
+
+    def prepare_datasets(self):
+        """ Sets up datasets and data loaders."""
+
+        cf = self.cf
+        # DL_v = partial(DataLoader, batch_size=cf.TRAIN.BTSZ, shuffle=False)  # --- Used for val/test sets
+        DL_t = partial(DataLoader, batch_size=cf.TRAIN.BTSZ, shuffle=True, num_workers=cf.TRAIN.NUM_WK,
+                       prefetch_factor=cf.TRAIN.PREFETCH_FACTOR, persistent_workers=True, pin_memory=True)  # --- train
+
+        if cf.PATHS.TRAIN:
+            self.tds = TrainingDataset(cf)
+            self.tdl = DL_t(dataset=self.tds)
+        # if cf.EVALUATION.SD_VAL_SET:
+        #     self.val_dataset = EvalDataset(cf, cf.SD, cf.EVALUATION.SD_VAL_SET)
+        #     self.val_data_loader = DL_v(dataset=self.val_dataset)
+        # if cf.EVALUATION.SD_TEST_SET:
+        #     self.tes_dataset = EvalDataset(cf, cf.SD, cf.EVALUATION.SD_TEST_SET)
+        #     self.tes_data_loader = DL_v(dataset=self.tes_dataset)
+
+    def loss(self, reconstruction, reference):
+        """Setup loss according to the configuration and sets initial weights for classes if provided.
+
+        All loss functions are called with logits: loss = L(logits, labels).
+        Weights are initialized by ones if no initial weights are provided.
+        :param initial_weights: Initial class weights (optional), given as list of tuples [(class ID, weight), ...]
+        """
+        cf = self.cf
+        l_type = cf.TRAIN.LOSS.TYPE
+
+        if l_type == 'wae':
+            norm_ref = torch.clip(reference,0,1)
+            abs_diff = torch.abs(reconstruction-norm_ref)
+            weights = reference+0.1
+            return torch.mean(abs_diff*weights)
+
+    def load_checkpoint(self):
+        """Loads a checkpoint.
+
+        If LOAD_FROM is specified in the config, the models in the respective checkpoint will be used.
+        Else the 'latest.pt' model will be used if it exists (e.g. for continuing training)
+        If 'latest.pt' does not exist, the models from LOAD_INIT will be used (e.g. for domain adaptation)
+        or default initializations are used (training from scratch or pre-trained weights).
+        """
+
+        load = torch.load if torch.cuda.is_available() else partial(torch.load, map_location='cpu')
+        load_model = self.cf.CHECKPOINTS.LOAD_FROM
+
+        if load_model:  # --------------------------------------- Case 1: Explicit model given by LOAD_FROM
+            assert exists(load_model), f"Checkpoint cf.CHECKPOINTS.LOAD_FROM does not exist: {load_model}"
+            print('Loading seg model from cf.CHECKPOINTS.LOAD_FROM: ', load_model)
+            return load(load_model)
+        else:
+            checkpoint_file = pjoin(self.F['checkpoints'], 'latest.pt')
+            if exists(checkpoint_file):  # ----------------------- Case 2: Loading a native checkpoint
+                print('Loading native checkpoint:', checkpoint_file)
+                return load(checkpoint_file)
+
+    def restore_checkpoint(self, checkpoint):
+        """Initializes network(s) from a checkpoint.
+
+        If weights for networks are missing or incompatible, they will be skipped.
+        :param checkpoint: The loaded checkpoint file to be restored.
+        """
+
+        cf = self.cf
+        if checkpoint:
+            strict = cf.CHECKPOINTS.LOAD_STRICT
+            shape_mismatch = False
+            if cf.CHECKPOINTS.LOAD:
+                try:
+                    state_dict_to_load = checkpoint[f'state_dict']
+                    target_state_dict = self.net.state_dict()
+                    target_keys = target_state_dict.keys()
+                    to_drop = []
+                    for k, v in state_dict_to_load.items():
+                        if k not in target_keys:
+                            print(f"Parameter {k} is missing")
+                            continue
+                        if target_state_dict[k].shape != v.shape:
+                            print(f"Removing param set {k} due to size mismatch")
+                            to_drop.append(k)
+                            shape_mismatch = True
+                    for k in to_drop:
+                        state_dict_to_load.pop(k)
+                    self.net.load_state_dict(state_dict_to_load, strict=strict)
+                except ValueError:
+                    print(f'Network incompatible')
+                except KeyError:
+                    print(f'Network not in checkpoint')
+            if cf.CHECKPOINTS.LOAD_OPT and not shape_mismatch:
+                try:
+                    state_dict_to_load = checkpoint[f'optimizer_state_dict']
+                    self.opt.load_state_dict(state_dict_to_load)
+                except ValueError:
+                    print(f'Optimizer for incompatible')
+                except KeyError:
+                    print(f'Optimizer for not in checkpoint')
+
+            self.e = checkpoint['epoch']
+            self.e_es = checkpoint['es_epochs']
+
+            stored_top_scores = checkpoint['top_scores']
+            for entry in stored_top_scores.keys():
+                self.top_scores[entry] = stored_top_scores[entry]
+
+            print(f"Restored checkpoint from epoch {self.e}. Top scores: {self.top_scores}")
+
+    # ==================================================================================================== NETWORK-INIT
+
+    def init_network(self, make_optimizer=True):
+        """Initializes a 3DVAE and (optionally) its' optimizer.
+
+        Used to generate network based on configuration file.
+        :param make_optimizer: Creates the optimizer for the network (not required for evaluation).
+        """
+
+        self.net = model.Autoencoder3D(self.cf).to(self.device)
+        if not make_optimizer: return self.net
+
+        # --------------------------------------------------------------------- Setup optimizer:
+        hprm = self.cf.TRAIN.VAE
+        btsz = self.cf.TRAIN.BTSZ
+        prms = self.net.parameters()
+
+        if hprm.OPTIM == 'sgd':
+            self.opt = optim.SGD(prms, lr=hprm.LR, momentum=hprm.BETA1, weight_decay=hprm.WDEC)
+            print(f"Opt.: SGD: lr {hprm.LR} M {hprm.BETA1} [wdec={hprm.WDEC}, bs={btsz}]")
+        elif hprm.OPTIM == 'adam':
+            self.opt = optim.Adam(prms, lr=hprm.LR, betas=(hprm.BETA1, hprm.BETA2), weight_decay=hprm.WDEC)
+            print(f"Opt.: ADAM: lr {hprm.LR} B1/2 {hprm.BETA1}/{hprm.BETA2} [wdec={hprm.WDEC}, bs={btsz}]")
+        else:
+            raise NotImplementedError(f"Optimizer {hprm.OPTIM} is not supported")
+
+        return self.net, self.opt
+
+    # ======================================================================================================= AUXILIARY
+
+    def print_training_progress(self):
+        """Print information about training progress (epoch, early stopping, runtime, ETA).
+
+        Nothing is printed if verbosity is set to 0.
+        """
+        cf = self.cf
+        if self.train_start_time < 0:  # Setup at first call of the function
+            self.train_start_time = self.epoch_start_time = time.time()
+            self.e_run = -1
+
+        self.e_run += 1
+        run_time = time.time() - self.train_start_time
+        it_time = (time.time() - self.epoch_start_time) / cf.TRAIN.IT_P_EP
+        self.epoch_start_time = time.time()
+        eta_sek = int(run_time / self.e_run * (cf.TRAIN.N_EP_MAX - self.e + 1)) if self.e_run > 0 else 0
+        eta_hr, eta_min, eta_sec = sek2hms(eta_sek)
+
+        print(f"\n[{current_datetime_as_str()} / {int(run_time // 60)} min]\
+         epoch {self.e}/{cf.TRAIN.N_EP_MAX}, erl.st. cnt. {self.e_es}/{cf.TRAIN.EARLY_STOPPING_EP}\
+        , estimated remaining training time is {eta_hr}:{eta_min} ({int(it_time * 1000)} ms/batch)")
+
+    def print_num_params(self):
+        """Prints the number of parameters for the VAE."""
+
+        params = list(self.net.parameters())
+        pp = np.sum([np.prod(list(P.size())) for P in params])
+        print(f'Model has {pp} prms in {len(params)} vars ({int(pp * 4 / 1000 / 1000 * 10) / 10} MB)')
+
+    def check_finished(self):
+        """Checks if training is finished.
+
+        This function should be called after restoring a checkpoint and before each epoch to check
+        if training is already finished. Considers max epochs and early stopping. The function returns
+        True if training is finished and False otherwise.
+        """
+
+        return (0 < self.cf.TRAIN.N_EP_MAX <= self.e) or (0 < self.cf.TRAIN.EARLY_STOPPING_EP <= self.e_es)
+
+    # ========================================================================================================= WRITING
+
+    def may_save_model(self, f_name: str, net_only: False):
+        """Saves the current model status if cf.CHECKPOINTS.SAVE is True.
+
+        :param f_name: Name of file to write to (is appended to the 'checkpoint' folder)
+        :param net_only: Don't save optimizer.
+        """
+
+        cf = self.cf
+        if not cf.CHECKPOINTS.SAVE:
+            print("Skipping to save network")
+            return
+
+        if not net_only:
+            save_dict = {'epoch': self.e, 'es_epochs': self.e_es, 'top_scores': self.top_scores}
+            save_dict[f'state_dict'] = self.net.state_dict()
+            save_dict[f'optimizer_state_dict'] = self.opt.state_dict()
+        else:
+            save_dict = {f'state_dict': self.net.state_dict()}
+
+        print(f"Saving network to {f_name}")
+        torch.save(save_dict, pjoin(self.F['checkpoints'], f_name))
+
+    def save_training_samples(self, input_shells, predictions, references, folder='train'):
+        """ Save the first (max=4) training samples in a batch.
+
+        """
+        for b in range(min(input_shells.shape[0], 4)):
+            pass
+
+    # ================================================================================================== MAIN PROTOCOLS
+
+    def train_vae(self):
+        vae, vae_opt = self.init_network()
+        self.print_num_params()
+        self.restore_checkpoint(self.load_checkpoint())
+        if self.check_finished(): return
+        self.prepare_datasets()
+
+        while not self.check_finished():
+            self.e += 1
+            self.e_es += 1
+            self.print_training_progress()
+            self.net.train()
+            for i, batch in enumerate(self.tdl):
+                shell = batch['shell'].to(self.device, non_blocking=True)
+                dense = batch['dense'].to(self.device, non_blocking=True)
+
+                loss = self.loss(vae(shell), dense)
+                vae_opt.zero_grad()
+                loss.backward()
+                vae_opt.step()
+
+                if not i % 50:
+                    print(f'\r {i}/{self.cf.TRAIN.IT_P_EP} - {loss.item()}', end='', flush=True)
+
+            vae.eval()
+            # self.quick_eval_seg_on_training_batch()
+            # self.may_update_weights(self.CM)
+            # self.evaluate_segmentation_on_subset('validation')
+            # self.evaluate_segmentation_on_subset('testing')
+            # self.may_save_model('latest.pt')
+
+    def test_dataloader(self):
+        self.prepare_datasets()
+
+        # for j in range(10):
+        #     start = time.time()
+        #     for i in range(100):
+        #         self.tds.get_random_voxel_crop()
+        #     print(f'loading 100 crops took {time.time() - start} seconds.')
+        #
+
+        for i, batch in enumerate(self.tdl):
+            shell = batch['shell'].to(self.device, non_blocking=True)
+            dense = batch['dense'].to(self.device, non_blocking=True)
+
+            visualize_dense_grid(tensor2numpy(shell[0]), 'shell')
+            visualize_dense_grid(tensor2numpy(dense[0]), 'dense')
+            plt.show()
+
+
+
+def run_experiment(cf_path):
+    c = config.Config(cf_path)
+    # with open('./Documentation/_config_documentation.yaml') as file:
+    #     for line in file.readlines():
+    #         print(line)
+
+    c.check_consistency(config.Config('./Documentation/_config_documentation.yaml'))
+    H = ExperimentHandler(c)
+
+    if c.MODE == 'train_vae':
+        H.train_vae()
+
+    if c.MODE == 'test_dataloader':
+        H.test_dataloader()
+
+    del c, H
+    print('Experiment done!\n')
+
+
+if __name__ == "__main__":
+    assert len(sys.argv) == 2, "Usage: python main.py path/to/config.yaml or use experiment_scheduler.py"
+    run_experiment(sys.argv[1])

@@ -1,3 +1,7 @@
 /.git/*
 /.idea/*
 /Data/*
+/runs/def
+/runs/results
+/runs/vae_base
+/__pycache__

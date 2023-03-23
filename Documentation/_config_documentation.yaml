@@ -1,0 +1,60 @@
+# Documentation of the configuration files
+# The following placeholders may be used for paths
+# - ~CONFIG will be replaced by absolute path of the folder containing the config file
+# - ~CHCONFIG will be replaced by absolute path of the folder containing the child config file (LEAF-NODE)
+
+# ================================ BEGIN ATTRIBUTES ====================================
+
+# BASE: ~CONFIG/../local_paths.yaml  # Config file to inherit from
+
+PATHS: # ----------------- Contains the absolute or relative data paths to dataset folders
+  TRAIN: ""
+
+MODE: "" # --------------- Experiment mode ['train_vae']
+CUDA: "" # --------------- CUDA device to use: str(ID)
+
+DATA: # ------------------- Data configuration
+  SHELL_SIZE: 3 # -----------
+  VOXEL_SIZE: 0.2 # --------- Side length of each voxel [m]
+  IN_SIZE: 32 # ------------- Raster side length of voxel grids [vx]
+
+AUG: # -------------------- Online data augmentation
+  ROTATE: True # ------------ Apply random rotations
+  FLIP: True # -------------- Apply random flipping
+
+VAE_MODEL: # -------------- Variational auto encoder network
+  IN_CHN: 3 # --------------- Number of ingoing channels
+  OUT_CHN: 4 # -------------- Number of outgoing channels
+  TYPE: "cnn" # ------------ Architecture type ['cnn', ]
+
+TRAIN: # ------------------ Parameters regarding network training
+  SD_SET: "train" # --------- Training set ['train', 'all'] (for source domain)
+  IT_P_EP: 1000 # ----------- Number of training iterations per epoch
+  N_EP_MAX: 100 # ----------- Maximum number of epochs
+  EARLY_STOPPING_EP: 15 # --- Number of epochs after which training is stopped if val score does not improve
+  BTSZ: 16 # ---------------- Batchsize
+  NUM_WK: 0 # --------------- Number of workers for loading training data
+  PREFETCH_FACTOR: 8 # ------ ?
+  LOSS: # ------------------- Supervised classification loss
+    TYPE: "wae" # ------------- Loss to use in ['wae']
+  VAE: # -------------------- Variational auto encoder optimizer configuration
+    OPTIM: "adam" # ----------- Optimiser of Segmentation network in ['sgd', 'adam']
+    LR: 0.002 # --------------- Learning rate of Segmentation model
+    BETA1: 0.9 # -------------- Momentum
+    BETA2: 0.999 # ------------ 2nd momentum for ADAM
+    WDEC: 0.0 # --------------- Weight decay (0.0 = Off)
+
+CHECKPOINTS: # ------------ Settings for loading / saving models
+  LOAD_FROM: "" # ----------- Path to checkpoint (when loading for testing).
+  SAVE: True # -------------- Save checkpoints?
+  LOAD: True # -------------- Load checkpoint?
+  LOAD_OPT: True # ---------- Load optimizer?
+
+OUTPUTS: # ---------------- Settings for all outputs (e.g. images)
+  SAVE_SINGLE: False # ------ Stack output images to single image
+  SAVE_TRAIN: False # ------- Save training examples
+  SAVE_VAL: False # --------- Save validation predictions
+  SAVE_TEST: False # -------- Save test-set predictions
+  FOLDER: "~CONFIG/def" # --- Root path to outputs (exp. name)
+
+VERSION: 1.17
