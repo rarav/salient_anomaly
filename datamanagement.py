@@ -30,6 +30,37 @@ def create_shell(out, dense_grid, t):
     out[:, :, :] = dense_grid[:, :, :]
     out[t:-t - 1, t:-t - 1, t:-t - 1] = 0
 
+def rotate(points, yaw, pitch, roll):
+    """
+    Rotates points (nx3) by Euler angles in the order of z-y'-x" (pitch-roll-yaw)
+
+    points: nx3 numpy array
+    yaw: angle around z-axis, degrees
+    pitch: angle around x-axis, degrees
+    roll: angle around y-axis, degrees
+    """
+    omega = np.radians(pitch)
+    phi = np.radians(roll)
+    kappa = np.radians(yaw)
+
+    R_x = np.array([[1, 0, 0],
+                    [0, np.cos(omega), np.sin(omega)],
+                    [0, -np.sin(omega), np.cos(omega)]])
+
+    R_y = np.array([[np.cos(phi), 0, np.sin(phi)],
+                    [0, 1, 0],
+                    [-np.sin(phi), 0, np.cos(phi) ]])
+
+    R_z = np.array([[np.cos(kappa), np.sin(kappa), 0],
+                    [-np.sin(kappa), np.cos(kappa), 0],
+                    [0 ,0, 1]])
+    R = R_x.dot(R_y.dot(R_z))
+
+    # rotate points
+    r_pts = R.dot(points.T)
+    return r_pts.T
+
+
 
 @jit(nopython=True)
 def crop_pcl(points, min_bound, max_bound):
