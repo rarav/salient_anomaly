@@ -30,42 +30,11 @@ def create_shell(out, dense_grid, t):
     out[:, :, :] = dense_grid[:, :, :]
     out[t:-t - 1, t:-t - 1, t:-t - 1] = 0
 
-def rotate(points, yaw, pitch, roll):
-    """
-    Rotates points (nx3) by Euler angles in the order of z-y'-x" (pitch-roll-yaw)
-
-    points: nx3 numpy array
-    yaw: angle around z-axis, degrees
-    pitch: angle around x-axis, degrees
-    roll: angle around y-axis, degrees
-    """
-    omega = np.radians(pitch)
-    phi = np.radians(roll)
-    kappa = np.radians(yaw)
-
-    R_x = np.array([[1, 0, 0],
-                    [0, np.cos(omega), np.sin(omega)],
-                    [0, -np.sin(omega), np.cos(omega)]])
-
-    R_y = np.array([[np.cos(phi), 0, np.sin(phi)],
-                    [0, 1, 0],
-                    [-np.sin(phi), 0, np.cos(phi) ]])
-
-    R_z = np.array([[np.cos(kappa), np.sin(kappa), 0],
-                    [-np.sin(kappa), np.cos(kappa), 0],
-                    [0 ,0, 1]])
-    R = R_x.dot(R_y.dot(R_z))
-
-    # rotate points
-    r_pts = R.dot(points.T)
-    return r_pts.T
-
-
 
 @jit(nopython=True)
 def crop_pcl(points, min_bound, max_bound):
     num_p = points.shape[0]
-    where = np.zeros(num_p,np.bool_)
+    where = np.zeros(num_p, np.bool_)
     for i in range(num_p):
         x, y, z = points[i]
         if (x < min_bound[0] or x > max_bound[0] or
@@ -102,9 +71,9 @@ def preload(root: str) -> tuple:
 
         pcls.append(points)
 
-        #pcl = o3d.geometry.PointCloud()
-        #pcl.points = o3d.utility.Vector3dVector(points)  # N,3
-        #pcls.append(pcl)
+        # pcl = o3d.geometry.PointCloud()
+        # pcl.points = o3d.utility.Vector3dVector(points)  # N,3
+        # pcls.append(pcl)
 
         names.append(name)
 
@@ -119,15 +88,30 @@ class TrainingDataset(Dataset):
         side_length = cf.DATA.IN_SIZE
         self.voxel_size = cf.DATA.VOXEL_SIZE
         self.crop_size = cf.DATA.IN_SIZE * cf.DATA.VOXEL_SIZE
+        self.pre_crop_size = self.crop_size * 2
         self.dense_grid = np.zeros((side_length, side_length, side_length))
         self.shell_grid = np.zeros((side_length, side_length, side_length))
         self.shell_size = cf.DATA.SHELL_SIZE
+        self.random_rotation = cf.AUG.ROTATE
+        self.random_flip = cf.AUG.FLIP
 
         pcls, names = preload(cf.PATHS.TRAIN)
         self.pcls = pcls
         self.names = names
 
         self.ds_size = cf.TRAIN.IT_P_EP * cf.TRAIN.BTSZ
+        self.R_z = np.eye(3, dtype=np.float)
+        self.zero3 = np.zeros(3, dtype=np.float)
+
+    def rand_rotate(self, pcl):
+        kappa = np.random.uniform(-np.pi, np.pi)
+        cos_k = np.cos(kappa)
+        sin_k = np.sin(kappa)
+        self.R_z[0, 0] = cos_k
+        self.R_z[1, 1] = cos_k
+        self.R_z[0, 1] = sin_k
+        self.R_z[1, 0] = -sin_k
+        return self.R_z.dot(pcl.T).T
 
     def __len__(self):
         return self.ds_size
@@ -140,13 +124,85 @@ class TrainingDataset(Dataset):
 
         # pcd.rotate()
         num_points = pcl.shape[0]
-        center = pcl[random.randrange(0, num_points),:]  # 3,
-        min_bound = center - self.crop_size / 2.0  # 3,
-        max_bound = min_bound + self.crop_size - self.voxel_size / 2  # 3,
+        center = pcl[random.randrange(0, num_points), :]  # 3,
 
-        crop = crop_pcl(pcl,min_bound,max_bound)
+        # pre - crop
+        if self.random_rotation:
+
+            min_bound = center - self.pre_crop_size / 2.0
+            max_bound = min_bound + self.pre_crop_size
+
+            pre_crop = crop_pcl(pcl, min_bound, max_bound) - center
+            rot_pcl = self.rand_rotate(pre_crop)
+
+            min_bound = self.zero3 - self.crop_size / 2.0
+            max_bound = min_bound + self.crop_size - self.voxel_size / 2
+
+            crop = crop_pcl(rot_pcl, min_bound, max_bound)
+        else:
+            min_bound = center - self.crop_size / 2.0
+            max_bound = min_bound + self.crop_size - self.voxel_size / 2
+
+            crop = crop_pcl(pcl, min_bound, max_bound)
+
         voxelise(self.dense_grid, crop, min_bound, self.voxel_size)
+
+        if self.random_flip:
+            if np.random.random(1) > 0.5:
+                self.dense_grid[:, :, :] = self.dense_grid[::-1, ::-1, :]
 
         create_shell(self.shell_grid, self.dense_grid, self.shell_size)
         return {'dense': torch.from_numpy(self.dense_grid).float(),
                 'shell': torch.from_numpy(self.shell_grid).float()}
+
+
+class EvalDataset(Dataset):
+    def __init__(self, cf: config.Config, set):
+        side_length = cf.DATA.IN_SIZE
+        voxel_size = cf.DATA.VOXEL_SIZE
+        crop_size = cf.DATA.IN_SIZE * cf.DATA.VOXEL_SIZE
+        shell_size = cf.DATA.SHELL_SIZE
+
+        if set == 'validation':
+            pcls, names = preload(cf.PATHS.VALIDATION)
+        else:
+            pcls, names = preload(cf.PATHS.TEST)
+
+        self.ds_size = cf.TEST.NUM_POINTS
+        num_clouds = len(pcls)
+
+        self.voxel_grids = []
+        self.shell_grids = []
+        self.coordinates = []
+        self.cloud_names = []
+
+        np.random.seed(0)
+        for i in range(self.ds_size):
+            r = random.randrange(0, num_clouds)
+            pcl = pcls[r]
+            num_points = pcl.shape[0]
+            center = pcl[random.randrange(0, num_points), :]  # 3,
+
+            min_bound = center - crop_size / 2.0
+            max_bound = min_bound + crop_size - voxel_size / 2
+            crop = crop_pcl(pcl, min_bound, max_bound)
+
+            dense_grid = np.zeros((side_length, side_length, side_length))
+            shell_grid = np.zeros((side_length, side_length, side_length))
+            voxelise(dense_grid, crop, min_bound, voxel_size)
+            create_shell(shell_grid, dense_grid, shell_size)
+
+            self.voxel_grids.append(dense_grid)
+            self.shell_grids.append(shell_grid)
+            self.coordinates.append(center)
+            self.cloud_names.append(names[i])
+
+    def __len__(self):
+        return self.ds_size
+
+    def __getitem__(self, idx):
+        return {'dense': torch.from_numpy(self.voxel_grids[idx]).float(),
+                'shell': torch.from_numpy(self.shell_grids[idx]).float(),
+                'coord': torch.from_numpy(self.coordinates[idx]).float(),
+                'cname': torch.from_numpy(self.cloud_names[idx]).float()}
+

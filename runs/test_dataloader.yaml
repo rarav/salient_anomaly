@@ -25,6 +25,6 @@ OUTPUTS: # ---------------- Settings for all outputs (e.g. images)
   SAVE_TRAIN: False # ------- Save training examples
   SAVE_VAL: False # --------- Save validation predictions
   SAVE_TEST: False # -------- Save test-set predictions
-  FOLDER: "~CONFIG/def/" # -- Root path to outputs (exp. name)
+  FOLDER: "~CONFIG/results/dl_test/" # -- Root path to outputs (exp. name)
 
 VERSION: 1.17

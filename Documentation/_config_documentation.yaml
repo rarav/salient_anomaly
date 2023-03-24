@@ -9,6 +9,8 @@
 
 PATHS: # ----------------- Contains the absolute or relative data paths to dataset folders
   TRAIN: ""
+  VALIDATION: ""
+  TEST: ""
 
 MODE: "" # --------------- Experiment mode ['train_vae']
 CUDA: "" # --------------- CUDA device to use: str(ID)
@@ -33,7 +35,7 @@ TRAIN: # ------------------ Parameters regarding network training
   N_EP_MAX: 100 # ----------- Maximum number of epochs
   EARLY_STOPPING_EP: 15 # --- Number of epochs after which training is stopped if val score does not improve
   BTSZ: 16 # ---------------- Batchsize
-  NUM_WK: 0 # --------------- Number of workers for loading training data
+  NUM_WK: 2 # --------------- Number of workers for loading training data
   PREFETCH_FACTOR: 8 # ------ ?
   LOSS: # ------------------- Supervised classification loss
     TYPE: "wae" # ------------- Loss to use in ['wae']
@@ -43,6 +45,9 @@ TRAIN: # ------------------ Parameters regarding network training
     BETA1: 0.9 # -------------- Momentum
     BETA2: 0.999 # ------------ 2nd momentum for ADAM
     WDEC: 0.0 # --------------- Weight decay (0.0 = Off)
+
+TEST:
+  NUM_POINTS: 10000
 
 CHECKPOINTS: # ------------ Settings for loading / saving models
   LOAD_FROM: "" # ----------- Path to checkpoint (when loading for testing).

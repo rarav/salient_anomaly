@@ -1,17 +1,20 @@
 import os, datetime, sys, time
 from os.path import exists, join as pjoin
 
+import matplotlib.pyplot as plt
 import torch
 
 import config
 import model
-from datamanagement import TrainingDataset
+import tools
+from datamanagement import TrainingDataset, EvalDataset
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 import torch.nn as nn
 from torch import optim
 from functools import partial
 from tools import *
+import pickle
 
 
 class ExperimentHandler:
@@ -29,11 +32,10 @@ class ExperimentHandler:
 
     tds: Dataset
     tdl: DataLoader
-
-    # val_dataset: EvalDataset
-    # val_data_loader: DataLoader
-    # tes_dataset: EvalDataset
-    # tes_data_loader: DataLoader
+    vds: EvalDataset
+    vdl: DataLoader
+    tsds: EvalDataset
+    tsdl: DataLoader
 
     # ============================================================================================================ INIT
 
@@ -60,8 +62,8 @@ class ExperimentHandler:
         os.makedirs(root, exist_ok=True)
         self.F = FolderDict({
             'metrics': pjoin(root, 'confusion_matrices'), 'checkpoints': pjoin(root, 'checkpoints'),
-            'train': pjoin(root, 'images/0_training'), 'validation': pjoin(root, 'images/1_validation'),
-            'testing': pjoin(root, 'images/2_testing'),
+            'train': pjoin(root, 'outputs/0_training'), 'validation': pjoin(root, 'outputs/1_validation'),
+            'testing': pjoin(root, 'outputs/2_testing'),
         })
 
     def store_config(self):
@@ -101,38 +103,31 @@ class ExperimentHandler:
     # =============================================================================================== EXPERIMENT SETUPS
 
     def prepare_datasets(self):
-        """ Sets up datasets and data loaders."""
+        """ Sets up datasets and data loaders for training, validation and testing."""
 
         cf = self.cf
-        # DL_v = partial(DataLoader, batch_size=cf.TRAIN.BTSZ, shuffle=False)  # --- Used for val/test sets
+        DL_v = partial(DataLoader, batch_size=cf.TRAIN.BTSZ, shuffle=False)  # --- Used for val/test sets
         DL_t = partial(DataLoader, batch_size=cf.TRAIN.BTSZ, shuffle=True, num_workers=cf.TRAIN.NUM_WK,
                        prefetch_factor=cf.TRAIN.PREFETCH_FACTOR, persistent_workers=True, pin_memory=True)  # --- train
 
         if cf.PATHS.TRAIN:
             self.tds = TrainingDataset(cf)
             self.tdl = DL_t(dataset=self.tds)
-        # if cf.EVALUATION.SD_VAL_SET:
-        #     self.val_dataset = EvalDataset(cf, cf.SD, cf.EVALUATION.SD_VAL_SET)
-        #     self.val_data_loader = DL_v(dataset=self.val_dataset)
-        # if cf.EVALUATION.SD_TEST_SET:
-        #     self.tes_dataset = EvalDataset(cf, cf.SD, cf.EVALUATION.SD_TEST_SET)
-        #     self.tes_data_loader = DL_v(dataset=self.tes_dataset)
+        if cf.PATHS.VALIDATION:
+            self.vds = EvalDataset(cf, 'validation')
+            self.vdl = DL_v(dataset=self.vds)
+        if cf.PATHS.TEST:
+            self.tsds = EvalDataset(cf, 'test')
+            self.tsdl = DL_v(dataset=self.tsds)
 
     def loss(self, reconstruction, reference):
-        """Setup loss according to the configuration and sets initial weights for classes if provided.
+        """Setup loss according to the configuration and sets initial weights for classes if provided."""
 
-        All loss functions are called with logits: loss = L(logits, labels).
-        Weights are initialized by ones if no initial weights are provided.
-        :param initial_weights: Initial class weights (optional), given as list of tuples [(class ID, weight), ...]
-        """
-        cf = self.cf
-        l_type = cf.TRAIN.LOSS.TYPE
-
-        if l_type == 'wae':
-            norm_ref = torch.clip(reference,0,1)
-            abs_diff = torch.abs(reconstruction-norm_ref)
-            weights = reference+0.1
-            return torch.mean(abs_diff*weights)
+        if self.cf.TRAIN.LOSS.TYPE == 'wae':
+            norm_ref = torch.clip(reference, 0, 1)
+            abs_diff = torch.abs(reconstruction - norm_ref)
+            weights = torch.clip(reference, 1, 10)
+            return torch.mean(torch.pow(abs_diff,2) * weights)
 
     def load_checkpoint(self):
         """Loads a checkpoint.
@@ -298,12 +293,18 @@ class ExperimentHandler:
         print(f"Saving network to {f_name}")
         torch.save(save_dict, pjoin(self.F['checkpoints'], f_name))
 
-    def save_training_samples(self, input_shells, predictions, references, folder='train'):
+    def save_training_samples(self, input_shells, predictions, references):
         """ Save the first (max=4) training samples in a batch.
 
         """
+        root = self.F['train']
         for b in range(min(input_shells.shape[0], 4)):
-            pass
+            file_name = f'shell_pred_ref_{self.e}-{b}.pickle'
+            grids = [tools.tensor2numpy(input_shells[b]),
+                     tools.tensor2numpy(predictions[b]),
+                     tools.tensor2numpy(references[b])]
+            with open(pjoin(root, file_name), 'wb') as file:
+                pickle.dump(grids, file)
 
     # ================================================================================================== MAIN PROTOCOLS
 
@@ -318,20 +319,22 @@ class ExperimentHandler:
             self.e += 1
             self.e_es += 1
             self.print_training_progress()
-            self.net.train()
+            vae.train()
             for i, batch in enumerate(self.tdl):
                 shell = batch['shell'].to(self.device, non_blocking=True)
                 dense = batch['dense'].to(self.device, non_blocking=True)
 
-                loss = self.loss(vae(shell), dense)
+                recons = vae(shell)
+                loss = self.loss(recons, dense)
                 vae_opt.zero_grad()
                 loss.backward()
                 vae_opt.step()
 
                 if not i % 50:
-                    print(f'\r {i}/{self.cf.TRAIN.IT_P_EP} - {loss.item()}', end='', flush=True)
+                    print(f'\r {i}/{self.cf.TRAIN.IT_P_EP} - Loss: {loss.item():.3f}', end='', flush=True)
 
             vae.eval()
+            self.save_training_samples(shell, recons, dense)
             # self.quick_eval_seg_on_training_batch()
             # self.may_update_weights(self.CM)
             # self.evaluate_segmentation_on_subset('validation')
@@ -357,12 +360,8 @@ class ExperimentHandler:
             plt.show()
 
 
-
 def run_experiment(cf_path):
     c = config.Config(cf_path)
-    # with open('./Documentation/_config_documentation.yaml') as file:
-    #     for line in file.readlines():
-    #         print(line)
 
     c.check_consistency(config.Config('./Documentation/_config_documentation.yaml'))
     H = ExperimentHandler(c)

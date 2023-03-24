@@ -44,6 +44,8 @@ class Config(object):
     # START OF AUTOMATED CODE
     class PROT_PATHS(object):
         TRAIN: str
+        VALIDATION: str
+        TEST: str
 
     PATHS = PROT_PATHS()
 
@@ -95,12 +97,10 @@ class Config(object):
 
     TRAIN = PROT_TRAIN()
 
-    class PROT_EVALUATION(object):
-        METRIC: str
-        IN_SIZE: int
-        SW_SHIFT: int
+    class PROT_TEST(object):
+        NUM_POINTS: int
 
-    EVALUATION = PROT_EVALUATION()
+    TEST = PROT_TEST()
 
     class PROT_CHECKPOINTS(object):
         LOAD_FROM: str
@@ -111,8 +111,6 @@ class Config(object):
     CHECKPOINTS = PROT_CHECKPOINTS()
 
     class PROT_OUTPUTS(object):
-        GRID: int
-        IMAGE_EXT: str
         SAVE_SINGLE: bool
         SAVE_TRAIN: bool
         SAVE_VAL: bool
@@ -120,14 +118,6 @@ class Config(object):
         FOLDER: str
 
     OUTPUTS = PROT_OUTPUTS()
-
-    class PROT_STATS(object):
-        DOM: str
-        SET: str
-        CLASS_STATS: bool
-        CHANNEL_STATS: bool
-
-    STATS = PROT_STATS()
 
     VERSION: float
 
