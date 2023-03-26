@@ -203,6 +203,7 @@ class EvalDataset(Dataset):
     def __getitem__(self, idx):
         return {'dense': torch.from_numpy(self.voxel_grids[idx]).float(),
                 'shell': torch.from_numpy(self.shell_grids[idx]).float(),
-                'coord': torch.from_numpy(self.coordinates[idx]).float(),
-                'cname': torch.from_numpy(self.cloud_names[idx]).float()}
+                'coord': self.coordinates[idx],
+                'cname': self.cloud_names[idx]
+                }
 

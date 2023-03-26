@@ -25,9 +25,7 @@ AUG: # -------------------- Online data augmentation
   FLIP: True # -------------- Apply random flipping
 
 VAE_MODEL: # -------------- Variational auto encoder network
-  IN_CHN: 3 # --------------- Number of ingoing channels
-  OUT_CHN: 4 # -------------- Number of outgoing channels
-  TYPE: "cnn" # ------------ Architecture type ['cnn', ]
+  F_START: 16 # ------------- Number of features in first layer
 
 TRAIN: # ------------------ Parameters regarding network training
   SD_SET: "train" # --------- Training set ['train', 'all'] (for source domain)

@@ -18,8 +18,8 @@ import pickle
 
 
 class ExperimentHandler:
-    net: nn.Module  # ------------------ networks ["seg":segmentation, "gen":generator, "dis":discriminator, ...]
-    opt: object  # --------------------- corresponding optimizers (same keys as nets)
+    vae: nn.Module  # ------------------ variational auto encoder
+    opt: object  # --------------------- optimizer
     cf: config.Config  # --------------- configuration object (see args.py)
     e: int  # -------------------------- current epoch (int)
     e_run: int  # ---------------------- num. of trained epochs in run (different from e if training was interrupted)
@@ -165,7 +165,7 @@ class ExperimentHandler:
             if cf.CHECKPOINTS.LOAD:
                 try:
                     state_dict_to_load = checkpoint[f'state_dict']
-                    target_state_dict = self.net.state_dict()
+                    target_state_dict = self.vae.state_dict()
                     target_keys = target_state_dict.keys()
                     to_drop = []
                     for k, v in state_dict_to_load.items():
@@ -178,7 +178,7 @@ class ExperimentHandler:
                             shape_mismatch = True
                     for k in to_drop:
                         state_dict_to_load.pop(k)
-                    self.net.load_state_dict(state_dict_to_load, strict=strict)
+                    self.vae.load_state_dict(state_dict_to_load, strict=strict)
                 except ValueError:
                     print(f'Network incompatible')
                 except KeyError:
@@ -210,13 +210,13 @@ class ExperimentHandler:
         :param make_optimizer: Creates the optimizer for the network (not required for evaluation).
         """
 
-        self.net = model.Autoencoder3D(self.cf).to(self.device)
-        if not make_optimizer: return self.net
+        self.vae = model.Autoencoder3D(self.cf).to(self.device)
+        if not make_optimizer: return self.vae
 
         # --------------------------------------------------------------------- Setup optimizer:
         hprm = self.cf.TRAIN.VAE
         btsz = self.cf.TRAIN.BTSZ
-        prms = self.net.parameters()
+        prms = self.vae.parameters()
 
         if hprm.OPTIM == 'sgd':
             self.opt = optim.SGD(prms, lr=hprm.LR, momentum=hprm.BETA1, weight_decay=hprm.WDEC)
@@ -227,7 +227,7 @@ class ExperimentHandler:
         else:
             raise NotImplementedError(f"Optimizer {hprm.OPTIM} is not supported")
 
-        return self.net, self.opt
+        return self.vae, self.opt
 
     # ======================================================================================================= AUXILIARY
 
@@ -255,7 +255,7 @@ class ExperimentHandler:
     def print_num_params(self):
         """Prints the number of parameters for the VAE."""
 
-        params = list(self.net.parameters())
+        params = list(self.vae.parameters())
         pp = np.sum([np.prod(list(P.size())) for P in params])
         print(f'Model has {pp} prms in {len(params)} vars ({int(pp * 4 / 1000 / 1000 * 10) / 10} MB)')
 
@@ -269,9 +269,47 @@ class ExperimentHandler:
 
         return (0 < self.cf.TRAIN.N_EP_MAX <= self.e) or (0 < self.cf.TRAIN.EARLY_STOPPING_EP <= self.e_es)
 
+    # ========================================================================================================= EVALUATION
+
+    def evaluate_on_subset(self, subset):
+        if subset == 'validation':
+            if not self.cf.PATHS.VALIDATION:
+                return
+            ds = self.vds
+            dl = self.vdl
+        else:
+            if not self.cf.PATHS.TEST:
+                return
+            ds = self.tsds
+            dl = self.tsdl
+
+        recon_errors = []
+        test_coords = []
+
+        for batch in dl:
+            dense = batch['dense'].to(self.device, non_blocking=True)
+            shell = batch['shell'].to(self.device, non_blocking=True)
+            coord = batch['coord']
+            cname = batch['cname']
+
+            with torch.no_grad:
+                recons = self.vae(shell)
+                loss = self.loss(recons, dense)
+
+            recon_errors.append(tensor2numpy(loss))
+            test_coords.append(coord)
+
+        # todo check if test_coords == ds.coordinates
+        # may save model and results (as pcl?)
+            
+
+
+
+
+
     # ========================================================================================================= WRITING
 
-    def may_save_model(self, f_name: str, net_only: False):
+    def may_save_model(self, f_name: str, net_only=False):
         """Saves the current model status if cf.CHECKPOINTS.SAVE is True.
 
         :param f_name: Name of file to write to (is appended to the 'checkpoint' folder)
@@ -285,10 +323,10 @@ class ExperimentHandler:
 
         if not net_only:
             save_dict = {'epoch': self.e, 'es_epochs': self.e_es, 'top_scores': self.top_scores}
-            save_dict[f'state_dict'] = self.net.state_dict()
+            save_dict[f'state_dict'] = self.vae.state_dict()
             save_dict[f'optimizer_state_dict'] = self.opt.state_dict()
         else:
-            save_dict = {f'state_dict': self.net.state_dict()}
+            save_dict = {f'state_dict': self.vae.state_dict()}
 
         print(f"Saving network to {f_name}")
         torch.save(save_dict, pjoin(self.F['checkpoints'], f_name))
@@ -337,9 +375,9 @@ class ExperimentHandler:
             self.save_training_samples(shell, recons, dense)
             # self.quick_eval_seg_on_training_batch()
             # self.may_update_weights(self.CM)
-            # self.evaluate_segmentation_on_subset('validation')
-            # self.evaluate_segmentation_on_subset('testing')
-            # self.may_save_model('latest.pt')
+            self.evaluate_on_subset('validation')
+            self.evaluate_on_subset('testing')
+            self.may_save_model('latest.pt')
 
     def test_dataloader(self):
         self.prepare_datasets()
