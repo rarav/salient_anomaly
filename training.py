@@ -160,7 +160,6 @@ class ExperimentHandler:
 
         cf = self.cf
         if checkpoint:
-            strict = cf.CHECKPOINTS.LOAD_STRICT
             shape_mismatch = False
             if cf.CHECKPOINTS.LOAD:
                 try:

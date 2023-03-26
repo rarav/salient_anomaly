@@ -20,4 +20,4 @@ def plot_prediction(path):
 
 
 if __name__ == '__main__':
-    plot_prediction('./runs/results/vae_base/outputs/0_training/shell_pred_ref_1-1.pickle')
+    plot_prediction('./runs/results/vae_base/outputs/0_training/shell_pred_ref_0-0.pickle')

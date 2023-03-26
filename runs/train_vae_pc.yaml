@@ -19,7 +19,7 @@ VAE_MODEL: # -------------- Variational auto encoder network
   F_START: 16 # ------------- Number of features in first channel
 
 TRAIN: # ------------------ Parameters regarding network training
-  IT_P_EP: 2000 # ----------- Number of training iterations per epoch
+  IT_P_EP: 1000 # ----------- Number of training iterations per epoch
   N_EP_MAX: 100 # ----------- Maximum number of epochs
   EARLY_STOPPING_EP: 100 # --- Number of epochs after which training is stopped if val score does not improve
   BTSZ: 64 # ---------------- Batchsize
@@ -45,6 +45,6 @@ OUTPUTS: # ---------------- Settings for all outputs (e.g. images)
   SAVE_TRAIN: False # ------- Save training examples
   SAVE_VAL: False # --------- Save validation predictions
   SAVE_TEST: False # -------- Save test-set predictions
-  FOLDER: "~CONFIG/results/vae_base" # --- Root path to outputs (exp. name)
+  FOLDER: "~CONFIG/results/vae_pc" # --- Root path to outputs (exp. name)
 
 VERSION: 1.17
