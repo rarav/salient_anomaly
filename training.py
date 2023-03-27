@@ -73,7 +73,7 @@ class ExperimentHandler:
         """
         now_s = current_datetime_as_str() + '.yaml'
         with open(pjoin(self.cf.OUTPUTS.FOLDER, now_s), 'w+') as f:
-            f.write(f"# python main.py {' '.join(sys.argv[1:])}\n")
+            f.write(f"# python filterization.py {' '.join(sys.argv[1:])}\n")
             f.write(str(self.cf))
 
     def init_cuda(self):
@@ -414,5 +414,5 @@ def run_experiment(cf_path):
 
 
 if __name__ == "__main__":
-    assert len(sys.argv) == 2, "Usage: python main.py path/to/config.yaml or use experiment_scheduler.py"
+    assert len(sys.argv) == 2, "Usage: python filterization.py path/to/config.yaml or use experiment_scheduler.py"
     run_experiment(sys.argv[1])

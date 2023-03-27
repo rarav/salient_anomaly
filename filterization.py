@@ -5,6 +5,7 @@ import DM_tools, my_tools
 import numpy as np
 import DM_o3d_Visualize
 import open3d as o3d
+from matplotlib.path import Path
 
 
 import geopandas as gpd
@@ -12,11 +13,12 @@ import os, glob
 
 if __name__ == '__main__':
 
-    base_dir = r'../2021-03-09-VQ-880-GH/'
+    base_dir = r'../data/Pielach/2021-03-09-VQ-880-GH/'
+    laz_folder = 'laz/'
     shp_folder = os.path.join(base_dir,  'shpfiles/')
     odm_folder = os.path.join(base_dir,  'odm/')
 
-    files = glob.glob(base_dir + '*.laz')
+    files = glob.glob(base_dir + laz_folder + '*.laz')
     intersection_files = []
 
     filterize = True # for debugging purposes
@@ -33,7 +35,8 @@ if __name__ == '__main__':
     exp.oFormat = 'LAS_1.4_2Classes.xml'
 
     boulders_bounds = gpd.read_file(shp_folder + 'boulders.shp')  # bounds by Gottfried (known bounds)
-
+    boulders_xy = [line.geometry.boundary.xy[1] for id, line in boulders_bounds]
+    print('hello')
     # create odm and bounds file for all las/laz
     #---------------------------------------------
     for base_file in files:
@@ -46,29 +49,40 @@ if __name__ == '__main__':
         shp =  os.path.join(shp_folder, filename + '.shp')
 
         # check if bounds file exist (if it is, there is an odm)
-        if os.path.isfile(shp):
+        if os.path.isfile(odm):
             continue
-        print(f"Create boundaries file for {os.path.basename(base_file)})")
-        Import.Import(inFile= base_file, outFile=odm).run()
-        Bounds.Bounds(odm, shp).run()
+        else:
+            print(f"Create odm file for {os.path.basename(base_file)})")
+            Import.Import(inFile= base_file, outFile=odm).run()
 
-    # check intersections between odm and known anomalies
+        # if os.path.isfile(shp):
+        #     continue
+        # else:
+        #     print(f"Create boundary shapefile file for {os.path.basename(base_file)})")
+        #     Bounds.Bounds(odm, shp).run()
+
+    # check intersections between odm and known boulders
     files_odm = glob.glob(odm_folder + '/*.odm')
     for odm in files_odm:
         filename = os.path.basename(odm)[:-4]
-        shpfile = shp_folder + filename + '.shp'
+        # shpfile = shp_folder + filename + '.shp'
         # 2. check intersections
-        try:
-            las_bounds = gpd.GeoDataFrame.from_file(shpfile)  # bounds of the las file
-        except:
-            Bounds.Bounds(odm, shp).run()
+        # las_bounds = gpd.GeoDataFrame.from_file(shpfile)  # bounds of the las file
 
         cboulders = []  # current boulders
         for index1, boulder in boulders_bounds.iterrows():
-            for index2, las_bound in las_bounds.iterrows():
-                if boulder['geometry'].intersects(las_bound['geometry']):
-                    cboulders.append({'geometry': boulder['geometry'].intersects(las_bound['geometry'])})
-                    intersection_files.append(filename)
+            # for index2, las_bound in las_bounds.iterrows():
+            #     if boulder['geometry'].intersects(las_bound['geometry']):
+
+            xyz_dict = DM_tools.odm2numpy(odm)
+            xyz = np.vstack((xyz_dict['x'], xyz_dict['y'], xyz_dict['z'])).T
+            # xy_flat = xyz[:,:2]
+            boulder_path = Path(np.asarray(boulder['geometry']))
+            xy_in = boulder_path.contains_point(xyz)
+
+                    # cboulders.append({'geometry': boulder['geometry'].intersects(las_bound['geometry'])})
+                    # intersection_files.append(filename)
+                    # intersection_las = my_tools.create_las(())
 
         if filterize:
             print(f"fliterize {base_file}")
@@ -76,9 +90,6 @@ if __name__ == '__main__':
             AddInfo(inFile=odm, attribute='_Classification1=Classification').run()
             AddInfo(inFile=odm, attribute='Classification=0*Classification').run()
 
-
-            # filter2.robustInterpolation.filterThresholds = [.25 ,.5, 1, 1.5]
-            # filter2.robustInterpolation.lowerThresholdScale = -1
             filter2.inFile = odm
             filter2.run()
 
@@ -111,8 +122,6 @@ if __name__ == '__main__':
         # exp.outFile = base_file + '_filtered.las'
         # exp.inFile = odm
         # exp.run()
-
-
 
     print('Done!')
 

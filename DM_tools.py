@@ -102,8 +102,9 @@ def odm2numpy(odm, attributes_list=None, print_attributes=False):
 
     # build layout for attributes of interest (subset of odm attributes)
     lf = pyDM.AddInfoLayoutFactory()
-    for attribute in attributes_list:
-        type, inDM = lf.addColumn(dm, attribute,   True); assert inDM == True
+    if attributes_list is not None:
+        for attribute in attributes_list:
+            type, inDM = lf.addColumn(dm, attribute,   True); assert inDM == True
     layout = lf.getLayout()
 
     print("Get odm points as numpy object...")
