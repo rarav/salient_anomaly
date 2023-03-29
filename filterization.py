@@ -34,9 +34,14 @@ if __name__ == '__main__':
     exp = Export.Export()
     exp.oFormat = 'LAS_1.4_2Classes.xml'
 
-    boulders_bounds = gpd.read_file(shp_folder + 'boulders.shp')  # bounds by Gottfried (known bounds)
-    boulders_xy = [line.geometry.boundary.xy[1] for id, line in boulders_bounds]
-    print('hello')
+    boulders = []
+    boulders_bounds = gpd.read_file(shp_folder + 'boulders.shp')
+    for i, boulder in boulders_bounds.iterrows():
+        xx, yy = boulder['geometry'].exterior.coords.xy
+        boulder_xy = np.array(([xx.tolist(), yy.tolist()])).T
+        boulders.append(boulder_xy)
+
+    polygonsODM = DM_tools.polygons2odm(boulders, odm_folder + 'polygons.odm')
     # create odm and bounds file for all las/laz
     #---------------------------------------------
     for base_file in files:
@@ -69,16 +74,19 @@ if __name__ == '__main__':
         # 2. check intersections
         # las_bounds = gpd.GeoDataFrame.from_file(shpfile)  # bounds of the las file
 
-        cboulders = []  # current boulders
-        for index1, boulder in boulders_bounds.iterrows():
+        # cboulders = []  # current boulders
+        # for index1, boulder in boulders_bounds.iterrows():
             # for index2, las_bound in las_bounds.iterrows():
             #     if boulder['geometry'].intersects(las_bound['geometry']):
 
-            xyz_dict = DM_tools.odm2numpy(odm)
-            xyz = np.vstack((xyz_dict['x'], xyz_dict['y'], xyz_dict['z'])).T
+            # xyz_dict = DM_tools.odm2numpy(odm)
+            # xyz = np.vstack((xyz_dict['x'], xyz_dict['y'], xyz_dict['z'])).T
             # xy_flat = xyz[:,:2]
-            boulder_path = Path(np.asarray(boulder['geometry']))
-            xy_in = boulder_path.contains_point(xyz)
+            # xy_in = boulder_path.contains_point(xyz)
+        points = DM_tools.odm2geoseries(odm)
+        if points.crs is None:
+            points = points.set_crs(boulders_bounds.crs, inplace=True)
+        inxy = boulders_bounds.contains(points)
 
                     # cboulders.append({'geometry': boulder['geometry'].intersects(las_bound['geometry'])})
                     # intersection_files.append(filename)
