@@ -66,9 +66,7 @@ class Config(object):
     AUG = PROT_AUG()
 
     class PROT_VAE_MODEL(object):
-        IN_CHN: int
-        OUT_CHN: int
-        TYPE: str
+        F_START: int
 
     VAE_MODEL = PROT_VAE_MODEL()
 
@@ -99,6 +97,9 @@ class Config(object):
 
     class PROT_TEST(object):
         NUM_POINTS: int
+        STRIDE: int
+        PATH: str
+        OUT_PATH: str
 
     TEST = PROT_TEST()
 
