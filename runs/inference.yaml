@@ -1,0 +1,32 @@
+MODE: "inference"
+CUDA: "0"
+
+DATA:
+  SHELL_SIZE: 3
+  VOXEL_SIZE: 0.2
+  IN_SIZE: 32
+
+VAE_MODEL:
+  F_START: 64
+
+TRAIN:
+  BTSZ: 16
+  LOSS:
+    TYPE: "wae"
+
+TEST:
+  NUM_POINTS: -1
+  STRIDE: 1
+  PATH: "~CONFIG/../Data/test/120114_0.las"
+  PATH_OUT: "~CONFIG/inference/120114_0_saly.las"
+
+CHECKPOINTS:
+  LOAD_FROM: "~CONFIG/results/vae_base/checkpoints/latest.pt"
+  SAVE: True
+  LOAD: True
+  LOAD_OPT: False
+
+OUTPUTS:
+  FOLDER: "~CONFIG/inference"
+
+VERSION: 1.17

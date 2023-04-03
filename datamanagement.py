@@ -17,8 +17,8 @@ def file_table(root: str) -> pd.DataFrame:
     :return: A pandas Dataframe with columns ['Name', 'Path'].
     """
     data = []
-    for filename in os.listdir(root):
-        if not filename.endswith('laz'): continue
+    for filename in sorted(os.listdir(root)):
+        if not filename.endswith('las'): continue
 
         p_laz = pjoin(root, filename)
         data.append([filename, p_laz])
@@ -26,9 +26,9 @@ def file_table(root: str) -> pd.DataFrame:
     return pd.DataFrame(data, columns=['Name', 'Path'])
 
 
-def create_shell(out, dense_grid, t):
+def create_shell(out, dense_grid, s):
     out[:, :, :] = dense_grid[:, :, :]
-    out[t:-t - 1, t:-t - 1, t:-t - 1] = 0
+    out[s:-s - 1, s:-s - 1, s:-s - 1] = 0
 
 
 @jit(nopython=True)
@@ -51,6 +51,7 @@ def voxelise(out, points, min_bound, voxel_size):
     indices = np.floor((points - min_bound) / voxel_size)
     for index in indices:
         out[int(index[0]), int(index[1]), int(index[2])] += 1
+    out -= 1
 
 
 def preload(root: str) -> tuple:
@@ -62,23 +63,13 @@ def preload(root: str) -> tuple:
     print(f'Pre-loading point clouds from {root}')
     table = file_table(root)
     pcls, names = [], []
-    to_load = 3
     for _, row in table.iterrows():
         name, path = row
         pcl_las = lp.read(path)
         points = pcl_las.xyz - pcl_las.header.offsets.reshape(1, 3)  # N,3
         print(name, pcl_las)
-
         pcls.append(points)
-
-        # pcl = o3d.geometry.PointCloud()
-        # pcl.points = o3d.utility.Vector3dVector(points)  # N,3
-        # pcls.append(pcl)
-
         names.append(name)
-
-        to_load -= 1
-        if to_load == 0: break
 
     return pcls, names
 
@@ -125,6 +116,7 @@ class TrainingDataset(Dataset):
         # pcd.rotate()
         num_points = pcl.shape[0]
         center = pcl[random.randrange(0, num_points), :]  # 3,
+        center[2] += random.uniform(-0.5 * self.crop_size, 0.5 * self.crop_size)
 
         # pre - crop
         if self.random_rotation:
@@ -176,7 +168,12 @@ class EvalDataset(Dataset):
         self.coordinates = []
         self.cloud_names = []
 
+        self.clouds_num_points = {}
+        for cloud_name in names:
+            self.clouds_num_points[cloud_name] = 0
+
         np.random.seed(0)
+        random.seed(0)
         for i in range(self.ds_size):
             r = random.randrange(0, num_clouds)
             pcl = pcls[r]
@@ -190,12 +187,18 @@ class EvalDataset(Dataset):
             dense_grid = np.zeros((side_length, side_length, side_length))
             shell_grid = np.zeros((side_length, side_length, side_length))
             voxelise(dense_grid, crop, min_bound, voxel_size)
+
+            # dense_grid = np.clip(dense_grid,0,1)
+
             create_shell(shell_grid, dense_grid, shell_size)
 
             self.voxel_grids.append(dense_grid)
             self.shell_grids.append(shell_grid)
             self.coordinates.append(center)
-            self.cloud_names.append(names[i])
+            self.cloud_names.append(names[r])
+            self.clouds_num_points[names[r]] += 1
+
+        print('Preloaded clouds', self.clouds_num_points)
 
     def __len__(self):
         return self.ds_size
@@ -207,3 +210,56 @@ class EvalDataset(Dataset):
                 'cname': self.cloud_names[idx]
                 }
 
+
+class PclDataset(Dataset):
+    def __init__(self, cf: config.Config):
+        self.side_length = cf.DATA.IN_SIZE
+        self.voxel_size = cf.DATA.VOXEL_SIZE
+        self.crop_size = cf.DATA.IN_SIZE * cf.DATA.VOXEL_SIZE
+        self.shell_size = cf.DATA.SHELL_SIZE
+        self.out_path = cf.TEST.PATH_OUT
+        self.stride = cf.TEST.STRIDE
+
+        pcl = lp.read(cf.TEST.PATH)
+        np.random.seed(0)
+        random.seed(0)
+        self.points = pcl.xyz  # - pcl.header.offsets.reshape(1, 3)  # N,3
+        print('Num points', self.points.shape[0])
+        self.ds_size = min(cf.TEST.NUM_POINTS, self.points.shape[0]) if cf.TEST.NUM_POINTS > 0 else self.points.shape[0]
+        self.few_points = self.points[:self.ds_size:self.stride, :]
+        self.ds_size = self.few_points.shape[0]
+
+        header = lp.LasHeader(
+            point_format=pcl.header.point_format,
+            version=pcl.header.version,
+        )
+        header.offsets = pcl.header.offsets
+        header.add_extra_dim(lp.ExtraBytesParams(name="saliency", type=np.float32))
+
+        self.pcl_out = lp.LasData(header)
+        self.pcl_out.update_header()
+        self.pcl_out.xyz = self.few_points
+        # self.pcl_out.saliency = np.random.randint(-1503, 6546, len(self.pcl_out.points), np.float32)
+
+    def __len__(self):
+        return self.ds_size
+
+    def __getitem__(self, idx):
+        center = self.few_points[idx]
+
+        min_bound = center - self.crop_size / 2.0
+        max_bound = min_bound + self.crop_size - self.voxel_size / 2
+        crop = crop_pcl(self.points, min_bound, max_bound)
+
+        dense_grid = np.zeros((self.side_length, self.side_length, self.side_length))
+        shell_grid = np.zeros((self.side_length, self.side_length, self.side_length))
+        voxelise(dense_grid, crop, min_bound, self.voxel_size)
+
+        create_shell(shell_grid, dense_grid, self.shell_size)
+
+        return {'dense': torch.from_numpy(dense_grid).float(),
+                'shell': torch.from_numpy(shell_grid).float(), }
+
+    def save_with_saliency(self, saliency):
+        self.pcl_out.saliency = np.array(saliency, np.float32)
+        self.pcl_out.write(self.out_path)

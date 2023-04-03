@@ -5,11 +5,13 @@ import matplotlib.pyplot as plt
 import torch
 
 import config
+import datamanagement
 import model
 import tools
 from datamanagement import TrainingDataset, EvalDataset
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
+from torch.nn import functional
 import torch.nn as nn
 from torch import optim
 from functools import partial
@@ -29,6 +31,7 @@ class ExperimentHandler:
     train_start_time: float  # --------- training start time
     epoch_start_time: float  # --------- start time of current epoch
     device: str  # --------------------- device to use ('cpu' or 'cuda')
+    block3d: torch.nn.Module
 
     tds: Dataset
     tdl: DataLoader
@@ -100,7 +103,13 @@ class ExperimentHandler:
         self.train_start_time = -1.0
         self.top_scores = {'training': 0.0, 'validation': 0.0, 'testing': 0.0}
 
-    # =============================================================================================== EXPERIMENT SETUPS
+        self.block3d = nn.Conv3d(1, 1, (3, 3, 3), padding=1, bias=False)
+        torch.nn.init.constant_(self.block3d.weight, 1.0 / (3 * 3 * 3))
+        for param in self.block3d.parameters():  # mask is not updated
+            param.requires_grad = False
+        self.block3d.to(self.device)
+
+        # =============================================================================================== EXPERIMENT SETUPS
 
     def prepare_datasets(self):
         """ Sets up datasets and data loaders for training, validation and testing."""
@@ -119,15 +128,6 @@ class ExperimentHandler:
         if cf.PATHS.TEST:
             self.tsds = EvalDataset(cf, 'test')
             self.tsdl = DL_v(dataset=self.tsds)
-
-    def loss(self, reconstruction, reference):
-        """Setup loss according to the configuration and sets initial weights for classes if provided."""
-
-        if self.cf.TRAIN.LOSS.TYPE == 'wae':
-            norm_ref = torch.clip(reference, 0, 1)
-            abs_diff = torch.abs(reconstruction - norm_ref)
-            weights = torch.clip(reference, 1, 10)
-            return torch.mean(torch.pow(abs_diff,2) * weights)
 
     def load_checkpoint(self):
         """Loads a checkpoint.
@@ -177,7 +177,7 @@ class ExperimentHandler:
                             shape_mismatch = True
                     for k in to_drop:
                         state_dict_to_load.pop(k)
-                    self.vae.load_state_dict(state_dict_to_load, strict=strict)
+                    self.vae.load_state_dict(state_dict_to_load)
                 except ValueError:
                     print(f'Network incompatible')
                 except KeyError:
@@ -200,16 +200,14 @@ class ExperimentHandler:
 
             print(f"Restored checkpoint from epoch {self.e}. Top scores: {self.top_scores}")
 
-    # ==================================================================================================== NETWORK-INIT
-
     def init_network(self, make_optimizer=True):
-        """Initializes a 3DVAE and (optionally) its' optimizer.
+        """Initializes a 3DVAE and (optionally) its optimizer.
 
         Used to generate network based on configuration file.
         :param make_optimizer: Creates the optimizer for the network (not required for evaluation).
         """
 
-        self.vae = model.Autoencoder3D(self.cf).to(self.device)
+        self.vae = model.Autoencoder3DRes(self.cf, self.device)
         if not make_optimizer: return self.vae
 
         # --------------------------------------------------------------------- Setup optimizer:
@@ -268,43 +266,26 @@ class ExperimentHandler:
 
         return (0 < self.cf.TRAIN.N_EP_MAX <= self.e) or (0 < self.cf.TRAIN.EARLY_STOPPING_EP <= self.e_es)
 
-    # ========================================================================================================= EVALUATION
+    # ====================================================================================================== EVALUATION
 
     def evaluate_on_subset(self, subset):
         if subset == 'validation':
-            if not self.cf.PATHS.VALIDATION:
-                return
-            ds = self.vds
+            if not self.cf.PATHS.VALIDATION: return
             dl = self.vdl
         else:
-            if not self.cf.PATHS.TEST:
-                return
-            ds = self.tsds
+            if not self.cf.PATHS.TEST: return
             dl = self.tsdl
 
         recon_errors = []
-        test_coords = []
-
         for batch in dl:
             dense = batch['dense'].to(self.device, non_blocking=True)
             shell = batch['shell'].to(self.device, non_blocking=True)
-            coord = batch['coord']
-            cname = batch['cname']
-
-            with torch.no_grad:
+            with torch.no_grad():
                 recons = self.vae(shell)
-                loss = self.loss(recons, dense)
+                loss = self.loss(recons, dense, keep_batch_axis=True)
+            recon_errors.extend(tensor2numpy(loss))
 
-            recon_errors.append(tensor2numpy(loss))
-            test_coords.append(coord)
-
-        # todo check if test_coords == ds.coordinates
-        # may save model and results (as pcl?)
-            
-
-
-
-
+        print("Average reconstruction error:", np.mean(np.array(recon_errors)))
 
     # ========================================================================================================= WRITING
 
@@ -343,7 +324,37 @@ class ExperimentHandler:
             with open(pjoin(root, file_name), 'wb') as file:
                 pickle.dump(grids, file)
 
-    # ================================================================================================== MAIN PROTOCOLS
+    # ======================================================================================================== TRAINING
+
+    def loss(self, reconstruction, reference, keep_batch_axis=False):
+        """Setup loss according to the configuration and sets initial weights for classes if provided.
+
+        Reference is encoded as (number of points - 1). Voxels containing a single point are ignored in the loss.
+        The remaining voxels are clipped to 0 (free) or 1 (occupied).
+        Predictions are bound to the range 0 - 1 by the sigmoid function.
+        Loss is average square error for voxels that are not ignored.
+        """
+
+        if self.cf.TRAIN.LOSS.TYPE == 'wae':
+            # pos_preds = (reconstruction > 0.5).float()
+            # sure = (torch.abs(reconstruction - 0.5) > 0.1).float()
+            norm_ref = torch.clip(reference, 0, 1)
+            # correct = ((norm_ref == pos_preds)).float()
+            # ignore = sure * correct
+            # consider = (1 - ignore)
+            weights = (reference != 0).float()  # torch.ones_like(reference)  # , 1, 2)
+            # weights += (reference > 1).float() # double weight if at least two hits in voxel
+            weights = weights.detach()  # consider *
+
+            # ref_blurred = self.block3d(torch.unsqueeze(norm_ref, 1))[:, 0, :, :]
+            # ref_max = torch.maximum(ref_blurred, norm_ref)
+            abs_diff = (reconstruction[:, 0, :, :] - norm_ref)
+
+            # return torch.sum(torch.abs(abs_diff) * weights) / torch.sum(weights)
+            if not keep_batch_axis:
+                return torch.sum(torch.pow(abs_diff, 2) * weights) / torch.sum(weights)
+            else:
+                return torch.sum(torch.pow(abs_diff, 2) * weights, dim=(1, 2, 3)) / torch.sum(weights, dim=(1, 2, 3))
 
     def train_vae(self):
         vae, vae_opt = self.init_network()
@@ -357,6 +368,7 @@ class ExperimentHandler:
             self.e_es += 1
             self.print_training_progress()
             vae.train()
+            avl = []
             for i, batch in enumerate(self.tdl):
                 shell = batch['shell'].to(self.device, non_blocking=True)
                 dense = batch['dense'].to(self.device, non_blocking=True)
@@ -369,7 +381,8 @@ class ExperimentHandler:
 
                 if not i % 50:
                     print(f'\r {i}/{self.cf.TRAIN.IT_P_EP} - Loss: {loss.item():.3f}', end='', flush=True)
-
+                    avl.append(loss.item())
+            print(f' - average loss: {np.mean(avl):.3f}')
             vae.eval()
             self.save_training_samples(shell, recons, dense)
             # self.quick_eval_seg_on_training_batch()
@@ -377,6 +390,37 @@ class ExperimentHandler:
             self.evaluate_on_subset('validation')
             self.evaluate_on_subset('testing')
             self.may_save_model('latest.pt')
+
+    def inference(self):
+        vae = self.init_network(make_optimizer=False)
+        self.print_num_params()
+        self.restore_checkpoint(self.load_checkpoint())
+
+        ds = datamanagement.PclDataset(self.cf)
+        dl = DataLoader(dataset=ds, batch_size=self.cf.TRAIN.BTSZ, shuffle=False)
+
+        recon_errors = []
+        cnt = 0
+        start = time.time()
+
+        for batch in dl:
+            cnt += self.cf.TRAIN.BTSZ
+            if (cnt/self.cf.TRAIN.BTSZ) % 10 == 0:
+                crnt = time.time()
+                diff = crnt - start
+                print(f'\r Points: {cnt}/{len(ds)} time (sek): {diff:.1f}/{diff/cnt*len(ds):.1f}',end='',flush=True)
+            dense = batch['dense'].to(self.device, non_blocking=True)
+            shell = batch['shell'].to(self.device, non_blocking=True)
+
+            with torch.no_grad():
+                recons = vae(shell)
+                loss = self.loss(recons, dense, keep_batch_axis=True)
+            recon_errors.extend(tensor2numpy(loss))
+
+        ds.save_with_saliency(recon_errors)
+        print("Average reconstruction error:", np.mean(np.array(recon_errors)))
+
+        # may save model and results (as pcl?)
 
     def test_dataloader(self):
         self.prepare_datasets()
@@ -405,6 +449,9 @@ def run_experiment(cf_path):
 
     if c.MODE == 'train_vae':
         H.train_vae()
+
+    if c.MODE == 'inference':
+        H.inference()
 
     if c.MODE == 'test_dataloader':
         H.test_dataloader()

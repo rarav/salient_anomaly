@@ -3,5 +3,6 @@
 /Data/*
 /runs/def
 /runs/results
+/runs/inference
 /runs/vae_base
 /__pycache__

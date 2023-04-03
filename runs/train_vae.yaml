@@ -1,7 +1,7 @@
 PATHS:
-  TRAIN: "~CONFIG/../Data/developing/2021-03-09-VQ-880-GH/laz/"
-  VALIDATION: False
-  TEST: False
+  TRAIN: "~CONFIG/../Data/train/"
+  VALIDATION: "~CONFIG/../Data/val/"
+  TEST: "~CONFIG/../Data/test/"
 
 MODE: "train_vae"
 CUDA: "0"
@@ -16,23 +16,25 @@ AUG: # -------------------- Online data augmentation
   FLIP: True # -------------- Apply random flipping
 
 VAE_MODEL: # -------------- Variational auto encoder network
-  F_START: 16 # ------------- Number of features in first channel
+  F_START: 64 # ------------- Number of features in first channel
 
 TRAIN: # ------------------ Parameters regarding network training
-  IT_P_EP: 2000 # ----------- Number of training iterations per epoch
+  IT_P_EP: 2500 # ----------- Number of training iterations per epoch
   N_EP_MAX: 100 # ----------- Maximum number of epochs
   EARLY_STOPPING_EP: 100 # --- Number of epochs after which training is stopped if val score does not improve
-  BTSZ: 64 # ---------------- Batchsize
+  BTSZ: 16 # ---------------- Batchsize
   NUM_WK: 4 # --------------- Number of workers for loading training data
   PREFETCH_FACTOR: 16 # ------ ?
   LOSS: # ------------------- Supervised classification loss
     TYPE: "wae" # ------------- Loss to use in ['wae']
   VAE: # -------------------- Variational auto encoder optimizer configuration
     OPTIM: "adam" # ----------- Optimiser of Segmentation network in ['sgd', 'adam']
-    LR: 0.001 # -------------- Learning rate of Segmentation model
-    BETA1: 0.9 # -------------- Momentum
+    LR: 0.0001 # -------------- Learning rate of Segmentation model
+    BETA1: 0.0 # -------------- Momentum
     BETA2: 0.999 # ------------ 2nd momentum for ADAM
     WDEC: 0.0 # --------------- Weight decay (0.0 = Off)
+TEST:
+  NUM_POINTS: 1000
 
 CHECKPOINTS: # ------------ Settings for loading / saving models
   LOAD_FROM: "" # ----------- Path to checkpoint (when loading for testing).

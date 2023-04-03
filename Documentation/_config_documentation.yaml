@@ -12,7 +12,7 @@ PATHS: # ----------------- Contains the absolute or relative data paths to datas
   VALIDATION: ""
   TEST: ""
 
-MODE: "" # --------------- Experiment mode ['train_vae']
+MODE: "" # --------------- Experiment mode ['train_vae', 'inference']
 CUDA: "" # --------------- CUDA device to use: str(ID)
 
 DATA: # ------------------- Data configuration
@@ -44,8 +44,11 @@ TRAIN: # ------------------ Parameters regarding network training
     BETA2: 0.999 # ------------ 2nd momentum for ADAM
     WDEC: 0.0 # --------------- Weight decay (0.0 = Off)
 
-TEST:
-  NUM_POINTS: 10000
+TEST: # ------------------- Parameters for testing
+  NUM_POINTS: 10000 # ------- Number of points to evaluate
+  STRIDE: 1 # --------------- Load only every i-th point in MODE='inference'
+  PATH: "" # ---------------- Path to the point cloud to evaluate in MODE='inference'
+  OUT_PATH: "" # ------------ Path to store the resulting point cloud to in MODE='inference'
 
 CHECKPOINTS: # ------------ Settings for loading / saving models
   LOAD_FROM: "" # ----------- Path to checkpoint (when loading for testing).
