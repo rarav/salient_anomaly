@@ -22,13 +22,12 @@ def plot_training_curve(root):
 
 
 def plot_prediction(path):
-    print(path)
+    print('Showing file:', path)
     with open(path, 'rb') as f:
         grids = pickle.load(f)
 
     shell, pred, ref = grids
-    print(pred[0, 5, 5, 5], pred[0, 16, 16, 16])
-    print(np.min(pred), np.max(pred), np.std(pred))
+    print('Min/max/std of predictions:', np.min(pred), np.max(pred), np.std(pred))
     pred = np.clip((pred * 50 - 25).astype(int)[0], 0, 25)  # smaller -> more points
 
     tools.visualize_dense_grid(shell, 'shell')
@@ -38,5 +37,5 @@ def plot_prediction(path):
 
 
 if __name__ == '__main__':
-    plot_training_curve('./runs/results/vae_small/metrics')
-    plot_prediction('./runs/results/vae_small/training_samples/shell_pred_ref_9-1.pickle')
+    # plot_training_curve('./runs/results/vae_small/metrics')
+    plot_prediction('./runs/results/vae_small/training_samples/shell_pred_ref_42-0.pickle')
