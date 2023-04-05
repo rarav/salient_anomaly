@@ -12,31 +12,32 @@ PATHS: # ----------------- Contains the absolute or relative data paths to datas
   VALIDATION: ""
   TEST: ""
 
-MODE: "" # --------------- Experiment mode ['train_vae', 'inference']
+MODE: "" # --------------- Experiment mode ['train_vae', 'inference', 'test_dataloader']
 CUDA: "" # --------------- CUDA device to use: str(ID)
 
 DATA: # ------------------- Data configuration
-  SHELL_SIZE: 3 # -----------
+  SHELL_SIZE: 3 # ----------- Width of the shell [vx]
   VOXEL_SIZE: 0.2 # --------- Side length of each voxel [m]
   IN_SIZE: 32 # ------------- Raster side length of voxel grids [vx]
 
 AUG: # -------------------- Online data augmentation
-  ROTATE: True # ------------ Apply random rotations
-  FLIP: True # -------------- Apply random flipping
+  ROTATE: True # ------------ Apply random rotations along height axis?
+  FLIP: True # -------------- Apply random flipping?
 
 VAE_MODEL: # -------------- Variational auto encoder network
-  F_START: 16 # ------------- Number of features in first layer
+  TYPE: "unet" # ------------ Architecture type ['unet', 'resnet']
+  F_START: 16 # ------------- Number of features in first layer of the network
 
 TRAIN: # ------------------ Parameters regarding network training
   SD_SET: "train" # --------- Training set ['train', 'all'] (for source domain)
   IT_P_EP: 1000 # ----------- Number of training iterations per epoch
   N_EP_MAX: 100 # ----------- Maximum number of epochs
-  EARLY_STOPPING_EP: 15 # --- Number of epochs after which training is stopped if val score does not improve
-  BTSZ: 16 # ---------------- Batchsize
+  EARLY_STOPPING_EP: 5 # ---- Number of epochs after which training is stopped if val recon error is not decreasing
+  BTSZ: 16 # ---------------- Batch size
   NUM_WK: 2 # --------------- Number of workers for loading training data
-  PREFETCH_FACTOR: 8 # ------ ?
+  PREFETCH_FACTOR: 8 # ------ Parameter for training data loaders
   LOSS: # ------------------- Supervised classification loss
-    TYPE: "wae" # ------------- Loss to use in ['wae']
+    TYPE: "wae" # ------------- Loss to use in ['wae', 'dice']
   VAE: # -------------------- Variational auto encoder optimizer configuration
     OPTIM: "adam" # ----------- Optimiser of Segmentation network in ['sgd', 'adam']
     LR: 0.002 # --------------- Learning rate of Segmentation model
@@ -57,10 +58,6 @@ CHECKPOINTS: # ------------ Settings for loading / saving models
   LOAD_OPT: True # ---------- Load optimizer?
 
 OUTPUTS: # ---------------- Settings for all outputs (e.g. images)
-  SAVE_SINGLE: False # ------ Stack output images to single image
   SAVE_TRAIN: False # ------- Save training examples
-  SAVE_VAL: False # --------- Save validation predictions
-  SAVE_TEST: False # -------- Save test-set predictions
+  SAVE_METRICS: False # ----- Save validation predictions
   FOLDER: "~CONFIG/def" # --- Root path to outputs (exp. name)
-
-VERSION: 1.17

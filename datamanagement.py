@@ -67,7 +67,6 @@ def preload(root: str) -> tuple:
         name, path = row
         pcl_las = lp.read(path)
         points = pcl_las.xyz - pcl_las.header.offsets.reshape(1, 3)  # N,3
-        print(name, pcl_las)
         pcls.append(points)
         names.append(name)
 
@@ -217,7 +216,7 @@ class PclDataset(Dataset):
         self.voxel_size = cf.DATA.VOXEL_SIZE
         self.crop_size = cf.DATA.IN_SIZE * cf.DATA.VOXEL_SIZE
         self.shell_size = cf.DATA.SHELL_SIZE
-        self.out_path = cf.TEST.PATH_OUT
+        self.out_path = cf.TEST.OUT_PATH
         self.stride = cf.TEST.STRIDE
 
         pcl = lp.read(cf.TEST.PATH)

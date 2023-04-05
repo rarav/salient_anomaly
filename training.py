@@ -27,7 +27,7 @@ class ExperimentHandler:
     e_run: int  # ---------------------- num. of trained epochs in run (different from e if training was interrupted)
     e_es: int  # ----------------------- num. of epochs since model improvement (e.g. increase of validation score)
     F: FolderDict  # ------------------- dictionary of folders for saving/loading
-    top_scores: dict  # ---------------- dictionary of best scores
+    scores: dict  # ---------------- dictionary of best scores
     train_start_time: float  # --------- training start time
     epoch_start_time: float  # --------- start time of current epoch
     device: str  # --------------------- device to use ('cpu' or 'cuda')
@@ -64,9 +64,8 @@ class ExperimentHandler:
         root = self.cf.OUTPUTS.FOLDER
         os.makedirs(root, exist_ok=True)
         self.F = FolderDict({
-            'metrics': pjoin(root, 'confusion_matrices'), 'checkpoints': pjoin(root, 'checkpoints'),
-            'train': pjoin(root, 'outputs/0_training'), 'validation': pjoin(root, 'outputs/1_validation'),
-            'testing': pjoin(root, 'outputs/2_testing'),
+            'metrics': pjoin(root, 'metrics'), 'checkpoints': pjoin(root, 'checkpoints'),
+            'train': pjoin(root, 'training_samples'),
         })
 
     def store_config(self):
@@ -96,18 +95,12 @@ class ExperimentHandler:
     def init_aux_vars(self):
         """Sets up all auxiliary variables.
 
-        Auxiliary variables are used for computing/storing metrics, tracking epoch, compute weighted loss.
+        Auxiliary variables are used for storing metrics, tracking epoch, timing.
         Note that the confusion matrix (self.CM) is reused multiple times.
         """
         self.e, self.e_es = -1, -1
         self.train_start_time = -1.0
-        self.top_scores = {'training': 0.0, 'validation': 0.0, 'testing': 0.0}
-
-        self.block3d = nn.Conv3d(1, 1, (3, 3, 3), padding=1, bias=False)
-        torch.nn.init.constant_(self.block3d.weight, 1.0 / (3 * 3 * 3))
-        for param in self.block3d.parameters():  # mask is not updated
-            param.requires_grad = False
-        self.block3d.to(self.device)
+        self.scores = {'validation': 1.0, }
 
         # =============================================================================================== EXPERIMENT SETUPS
 
@@ -191,14 +184,17 @@ class ExperimentHandler:
                 except KeyError:
                     print(f'Optimizer for not in checkpoint')
 
-            self.e = checkpoint['epoch']
-            self.e_es = checkpoint['es_epochs']
+            if cf.MODE == 'train_vae':
+                self.e = checkpoint['epoch']
+                self.e_es = checkpoint['es_epochs']
 
-            stored_top_scores = checkpoint['top_scores']
-            for entry in stored_top_scores.keys():
-                self.top_scores[entry] = stored_top_scores[entry]
+                stored_top_scores = checkpoint['scores']
+                for entry in stored_top_scores.keys():
+                    self.scores[entry] = stored_top_scores[entry]
 
-            print(f"Restored checkpoint from epoch {self.e}. Top scores: {self.top_scores}")
+                print(f"Restored checkpoint from epoch {self.e}. Top scores: {self.scores}")
+            else:
+                print("Restored checkpoint")
 
     def init_network(self, make_optimizer=True):
         """Initializes a 3DVAE and (optionally) its optimizer.
@@ -207,7 +203,13 @@ class ExperimentHandler:
         :param make_optimizer: Creates the optimizer for the network (not required for evaluation).
         """
 
-        self.vae = model.Autoencoder3DRes(self.cf, self.device)
+        if self.cf.VAE_MODEL.TYPE == 'unet':
+            self.vae = model.Autoencoder3D(self.cf, self.device)
+        elif self.cf.VAE_MODEL.TYPE == 'resnet':
+            self.vae = model.Autoencoder3DRes(self.cf, self.device)
+        else:
+            raise NotImplementedError(f"Model type {self.cf.VAE_MODEL.TYPE} is not supported")
+
         if not make_optimizer: return self.vae
 
         # --------------------------------------------------------------------- Setup optimizer:
@@ -272,9 +274,11 @@ class ExperimentHandler:
         if subset == 'validation':
             if not self.cf.PATHS.VALIDATION: return
             dl = self.vdl
+            update_es = True
         else:
             if not self.cf.PATHS.TEST: return
             dl = self.tsdl
+            update_es = False
 
         recon_errors = []
         for batch in dl:
@@ -285,7 +289,18 @@ class ExperimentHandler:
                 loss = self.loss(recons, dense, keep_batch_axis=True)
             recon_errors.extend(tensor2numpy(loss))
 
-        print("Average reconstruction error:", np.mean(np.array(recon_errors)))
+        avg_error = float(np.mean(np.array(recon_errors)))
+        print(f"Average reconstruction error on subset {subset}: {avg_error:.3f}")
+        if self.cf.OUTPUTS.SAVE_METRICS:
+            with open(pjoin(self.F['metrics'], f"{subset}-{self.e}.loss"), 'wb') as f:
+                pickle.dump(avg_error, f)
+
+        if update_es:
+            min_val_recon = self.scores['validation']
+            if avg_error < min_val_recon:
+                self.scores['validation'] = avg_error
+                self.e_es = 0
+                self.may_save_model('validation.pt', net_only=True)
 
     # ========================================================================================================= WRITING
 
@@ -293,7 +308,7 @@ class ExperimentHandler:
         """Saves the current model status if cf.CHECKPOINTS.SAVE is True.
 
         :param f_name: Name of file to write to (is appended to the 'checkpoint' folder)
-        :param net_only: Don't save optimizer.
+        :param net_only: Don't save optimizer and metrics.
         """
 
         cf = self.cf
@@ -301,12 +316,11 @@ class ExperimentHandler:
             print("Skipping to save network")
             return
 
-        if not net_only:
-            save_dict = {'epoch': self.e, 'es_epochs': self.e_es, 'top_scores': self.top_scores}
-            save_dict[f'state_dict'] = self.vae.state_dict()
-            save_dict[f'optimizer_state_dict'] = self.opt.state_dict()
+        if net_only:
+            save_dict = {'state_dict': self.vae.state_dict()}
         else:
-            save_dict = {f'state_dict': self.vae.state_dict()}
+            save_dict = {'epoch': self.e, 'es_epochs': self.e_es, 'scores': self.scores,
+                         'state_dict': self.vae.state_dict(), 'optimizer_state_dict': self.opt.state_dict()}
 
         print(f"Saving network to {f_name}")
         torch.save(save_dict, pjoin(self.F['checkpoints'], f_name))
@@ -321,8 +335,8 @@ class ExperimentHandler:
             grids = [tools.tensor2numpy(input_shells[b]),
                      tools.tensor2numpy(predictions[b]),
                      tools.tensor2numpy(references[b])]
-            with open(pjoin(root, file_name), 'wb') as file:
-                pickle.dump(grids, file)
+            with open(pjoin(root, file_name), 'wb') as f:
+                pickle.dump(grids, f)
 
     # ======================================================================================================== TRAINING
 
@@ -334,27 +348,27 @@ class ExperimentHandler:
         Predictions are bound to the range 0 - 1 by the sigmoid function.
         Loss is average square error for voxels that are not ignored.
         """
+        pred = reconstruction[:, 0, :, :]
+        norm_ref = torch.clip(reference, 0, 1)
+        weigths = (reference != 0).float().detach()
 
-        if self.cf.TRAIN.LOSS.TYPE == 'wae':
-            # pos_preds = (reconstruction > 0.5).float()
-            # sure = (torch.abs(reconstruction - 0.5) > 0.1).float()
-            norm_ref = torch.clip(reference, 0, 1)
-            # correct = ((norm_ref == pos_preds)).float()
-            # ignore = sure * correct
-            # consider = (1 - ignore)
-            weights = (reference != 0).float()  # torch.ones_like(reference)  # , 1, 2)
-            # weights += (reference > 1).float() # double weight if at least two hits in voxel
-            weights = weights.detach()  # consider *
+        if self.cf.TRAIN.LOSS.TYPE == 'dice':
+            intersection = torch.sum(pred * norm_ref, dim=(1, 2, 3))
+            union = torch.sum(torch.maximum(pred, norm_ref) * weigths, dim=(1, 2, 3))
+            loss = 1 - intersection / union
 
-            # ref_blurred = self.block3d(torch.unsqueeze(norm_ref, 1))[:, 0, :, :]
-            # ref_max = torch.maximum(ref_blurred, norm_ref)
-            abs_diff = (reconstruction[:, 0, :, :] - norm_ref)
+        elif self.cf.TRAIN.LOSS.TYPE == 'mean_squared':
+            diff = (pred - norm_ref)
+            sq_diff = torch.pow(diff, 2)
+            loss = torch.sum(sq_diff * weigths, dim=(1, 2, 3)) / (torch.sum(weigths, dim=(1, 2, 3)) + 1e-5)
 
-            # return torch.sum(torch.abs(abs_diff) * weights) / torch.sum(weights)
-            if not keep_batch_axis:
-                return torch.sum(torch.pow(abs_diff, 2) * weights) / torch.sum(weights)
-            else:
-                return torch.sum(torch.pow(abs_diff, 2) * weights, dim=(1, 2, 3)) / torch.sum(weights, dim=(1, 2, 3))
+        else:
+            raise NotImplementedError(f"Loss {self.cf.TRAIN.LOSS.TYPE} is not supported")
+
+        if keep_batch_axis:
+            return loss
+        else:
+            return torch.mean(loss)
 
     def train_vae(self):
         vae, vae_opt = self.init_network()
@@ -382,11 +396,16 @@ class ExperimentHandler:
                 if not i % 50:
                     print(f'\r {i}/{self.cf.TRAIN.IT_P_EP} - Loss: {loss.item():.3f}', end='', flush=True)
                     avl.append(loss.item())
-            print(f' - average loss: {np.mean(avl):.3f}')
+
+            avg_error = float(np.mean(avl))
+            print(f' - average loss: {avg_error:.3f}')
+            if self.cf.OUTPUTS.SAVE_METRICS:
+                with open(pjoin(self.F['metrics'], f"training-{self.e}.loss"), 'wb') as f:
+                    pickle.dump(avg_error, f)
+
             vae.eval()
             self.save_training_samples(shell, recons, dense)
-            # self.quick_eval_seg_on_training_batch()
-            # self.may_update_weights(self.CM)
+
             self.evaluate_on_subset('validation')
             self.evaluate_on_subset('testing')
             self.may_save_model('latest.pt')
@@ -405,10 +424,11 @@ class ExperimentHandler:
 
         for batch in dl:
             cnt += self.cf.TRAIN.BTSZ
-            if (cnt/self.cf.TRAIN.BTSZ) % 10 == 0:
+            if (cnt / self.cf.TRAIN.BTSZ) % 10 == 0:
                 crnt = time.time()
                 diff = crnt - start
-                print(f'\r Points: {cnt}/{len(ds)} time (sek): {diff:.1f}/{diff/cnt*len(ds):.1f}',end='',flush=True)
+                print(f'\r Points: {cnt}/{len(ds)} time (sek): {diff:.1f}/{diff / cnt * len(ds):.1f}', end='',
+                      flush=True)
             dense = batch['dense'].to(self.device, non_blocking=True)
             shell = batch['shell'].to(self.device, non_blocking=True)
 

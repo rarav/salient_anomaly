@@ -66,6 +66,7 @@ class Config(object):
     AUG = PROT_AUG()
 
     class PROT_VAE_MODEL(object):
+        TYPE: str
         F_START: int
 
     VAE_MODEL = PROT_VAE_MODEL()
@@ -112,15 +113,11 @@ class Config(object):
     CHECKPOINTS = PROT_CHECKPOINTS()
 
     class PROT_OUTPUTS(object):
-        SAVE_SINGLE: bool
         SAVE_TRAIN: bool
-        SAVE_VAL: bool
-        SAVE_TEST: bool
+        SAVE_METRICS: bool
         FOLDER: str
 
     OUTPUTS = PROT_OUTPUTS()
-
-    VERSION: float
 
     # END OF AUTOMATED CODE
 
