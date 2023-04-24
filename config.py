@@ -45,7 +45,8 @@ class Config(object):
     class PROT_PATHS(object):
         TRAIN: str
         VALIDATION: str
-        TEST: str
+        TEST1: str
+        TEST2: str
 
     PATHS = PROT_PATHS()
 
@@ -68,6 +69,7 @@ class Config(object):
     class PROT_VAE_MODEL(object):
         TYPE: str
         F_START: int
+        HAS_PARAMS: bool
 
     VAE_MODEL = PROT_VAE_MODEL()
 

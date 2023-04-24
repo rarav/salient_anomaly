@@ -1,16 +1,10 @@
 BASE: "~CONFIG/train_vae_32_f16.yaml"
 
-MODE: "inference"
+MODE: "test_vae"
 CUDA: "0"
 
-TRAIN:
-  BTSZ: 64
-
 TEST:
-  NUM_POINTS: -1
-  STRIDE: 1
-  PATH: "~CONFIG/../Data/val/120034_0.las"
-  OUT_PATH: "~CONFIG/inference/120034_0_saly.las"
+  NUM_POINTS: 2500
 
 CHECKPOINTS:
   LOAD_FROM: "~CONFIG/results/vae_32_f16/checkpoints/validation.pt"
@@ -19,4 +13,8 @@ CHECKPOINTS:
   LOAD_OPT: False
 
 OUTPUTS:
-  FOLDER: "~CONFIG/inference"
+  SAVE_TRAIN: False
+  SAVE_METRICS: False
+  FOLDER: "~CONFIG/results/vae_32_f16"
+
+VERSION: 1.17

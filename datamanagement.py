@@ -156,8 +156,12 @@ class EvalDataset(Dataset):
 
         if set == 'validation':
             pcls, names = preload(cf.PATHS.VALIDATION)
+        elif set == 'test1':
+            pcls, names = preload(cf.PATHS.TEST1)
+        elif set == 'test2':
+            pcls, names = preload(cf.PATHS.TEST2)
         else:
-            pcls, names = preload(cf.PATHS.TEST)
+            raise ValueError(f'Unknown set {set}')
 
         self.ds_size = cf.TEST.NUM_POINTS
         num_clouds = len(pcls)

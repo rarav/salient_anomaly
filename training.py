@@ -118,9 +118,12 @@ class ExperimentHandler:
         if cf.PATHS.VALIDATION:
             self.vds = EvalDataset(cf, 'validation')
             self.vdl = DL_v(dataset=self.vds)
-        if cf.PATHS.TEST:
-            self.tsds = EvalDataset(cf, 'test')
-            self.tsdl = DL_v(dataset=self.tsds)
+        if cf.PATHS.TEST1:
+            self.tsds1 = EvalDataset(cf, 'test1')
+            self.tsdl1 = DL_v(dataset=self.tsds1)
+        if cf.PATHS.TEST2:
+            self.tsds2 = EvalDataset(cf, 'test2')
+            self.tsdl2 = DL_v(dataset=self.tsds2)
 
     def load_checkpoint(self):
         """Loads a checkpoint.
@@ -207,6 +210,8 @@ class ExperimentHandler:
             self.vae = model.Autoencoder3D(self.cf, self.device)
         elif self.cf.VAE_MODEL.TYPE == 'resnet':
             self.vae = model.Autoencoder3DRes(self.cf, self.device)
+        elif self.cf.VAE_MODEL.TYPE == 'plane':
+            self.vae = model.PlaneMatcher()
         else:
             raise NotImplementedError(f"Model type {self.cf.VAE_MODEL.TYPE} is not supported")
 
@@ -275,9 +280,13 @@ class ExperimentHandler:
             if not self.cf.PATHS.VALIDATION: return
             dl = self.vdl
             update_es = True
+        elif subset == 'test1':
+            if not self.cf.PATHS.TEST1: return
+            dl = self.tsdl1
+            update_es = False
         else:
-            if not self.cf.PATHS.TEST: return
-            dl = self.tsdl
+            if not self.cf.PATHS.TEST2: return
+            dl = self.tsdl2
             update_es = False
 
         recon_errors = []
@@ -371,6 +380,9 @@ class ExperimentHandler:
             return torch.mean(loss)
 
     def train_vae(self):
+
+        assert self.cf.VAE_MODEL.HAS_PARAMS, "VAE model has no parameters to train"
+
         vae, vae_opt = self.init_network()
         self.print_num_params()
         self.restore_checkpoint(self.load_checkpoint())
@@ -407,13 +419,29 @@ class ExperimentHandler:
             self.save_training_samples(shell, recons, dense)
 
             self.evaluate_on_subset('validation')
-            self.evaluate_on_subset('testing')
+            self.evaluate_on_subset('test1')
+            self.evaluate_on_subset('test2')
             self.may_save_model('latest.pt')
+
+    def test_vae(self):
+        vae = self.init_network(make_optimizer=False)
+        self.print_num_params()
+        if self.cf.VAE_MODEL.HAS_PARAMS:
+            self.restore_checkpoint(self.load_checkpoint())
+
+        self.prepare_datasets()
+        vae.eval()
+
+        self.evaluate_on_subset('validation')
+        self.evaluate_on_subset('test1')
+        self.evaluate_on_subset('test2')
+        self.may_save_model('latest.pt')
 
     def inference(self):
         vae = self.init_network(make_optimizer=False)
         self.print_num_params()
-        self.restore_checkpoint(self.load_checkpoint())
+        if self.cf.VAE_MODEL.HAS_PARAMS:
+            self.restore_checkpoint(self.load_checkpoint())
 
         ds = datamanagement.PclDataset(self.cf)
         dl = DataLoader(dataset=ds, batch_size=self.cf.TRAIN.BTSZ, shuffle=False)
@@ -439,8 +467,6 @@ class ExperimentHandler:
 
         ds.save_with_saliency(recon_errors)
         print("Average reconstruction error:", np.mean(np.array(recon_errors)))
-
-        # may save model and results (as pcl?)
 
     def test_dataloader(self):
         self.prepare_datasets()
@@ -469,6 +495,9 @@ def run_experiment(cf_path):
 
     if c.MODE == 'train_vae':
         H.train_vae()
+
+    if c.MODE == 'test_vae':
+        H.test_vae()
 
     if c.MODE == 'inference':
         H.inference()

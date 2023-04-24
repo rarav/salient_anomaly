@@ -2,6 +2,102 @@ import torch
 import torch.nn as nn
 from torch.nn import functional
 import config
+import tools
+from matplotlib import pyplot as plt
+
+
+# function that fits a plane to a set of points
+def match_plane(points):
+    """Fits a plane to a set of points
+    :param points: points.shape = N x 3
+    """
+
+    # get the mean of the points (center of mass) shape = 1 x 3
+    mean = torch.mean(points, dim=0, keepdim=True)
+
+    # center the points
+    centered_points = points - mean
+
+    # compute the covariance matrix
+    cov = torch.matmul(centered_points.T, centered_points)
+
+    # compute the eigenvalues and eigenvectors of the covariance matrix
+    eigenvalues, eigenvectors = torch.linalg.eig(cov)
+
+    # get the eigenvector corresponding to the largest eigenvalue
+    normal = eigenvectors[:, 2].float()
+
+    # compute the distance of the plane to the origin
+    d = torch.dot(normal, mean[0])
+
+    return normal, d
+
+
+def draw_plane_to_voxelgrid(plane, voxelgrid, threshold):
+    """Draws a plane to a voxelgrid (sets the voxels to one if they are within a threshold distance to the plane)
+
+    :param plane: plane parameters (normal, d)
+    :param voxelgrid: voxelgrid.shape = 1 x 32 x 32 x 32
+    """
+
+    # get the coordinates of all
+    coords = torch.argwhere(torch.ones_like(voxelgrid)).float()
+
+    # compute the distance of the voxels to the plane
+
+    distances = torch.abs(torch.matmul(coords, plane[0].reshape(3, 1)) - plane[1])[:, 0]
+
+    # set the value of the voxels to one if the distance is smaller than the threshold
+    toset = coords[distances < threshold].int()
+
+    voxelgrid[toset[:, 0], toset[:, 1], toset[:, 2]] = 1
+
+    return voxelgrid
+
+
+class PlaneMatcher(nn.Module):
+    def __init__(self):
+        super(PlaneMatcher, self).__init__()
+
+    def forward(self, x):
+        """Forward pass (cf. nn.Module)
+        :param x: input tensor (Voxel grid) x.shape = BS x 32x32x32
+        """
+
+        with torch.no_grad():
+            x = torch.clip(x, 0, 1)
+            for i in range(x.shape[0]):
+                x[i] = draw_plane_to_voxelgrid(match_plane(torch.argwhere(x[i]).float()), x[i], 0.5)
+            x = torch.unsqueeze(x, 1)
+
+        return x
+
+
+def test_plane_match():
+    """Test function for the plane matching module"""
+
+    # create a voxelgrid
+    voxelgrid = torch.zeros(1, 24, 24, 24)
+
+    # set the value of a few voxels to one
+    voxelgrid[0, 14, 2, 15] = 10
+    voxelgrid[0, 0, 0, 5] = 10
+    voxelgrid[0, 2, 23, 18] = 10
+    voxelgrid[0, 20, 20, 20] = 10
+
+    # create a plane matching module
+    plane_matcher = PlaneMatcher()
+
+    # apply the plane matching module to the voxelgrid
+    voxelgrid = plane_matcher(voxelgrid)
+
+    # visualise the voxelgrid
+    tools.visualize_dense_grid(voxelgrid[0, 0].detach().cpu().numpy(), 'test_plane_match')
+    plt.show()
+
+
+if __name__ == '__main__':
+    test_plane_match()
 
 
 # ---------------- U-Net like Network

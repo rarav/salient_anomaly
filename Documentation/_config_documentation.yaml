@@ -10,7 +10,8 @@
 PATHS: # ----------------- Contains the absolute or relative data paths to dataset folders
   TRAIN: ""
   VALIDATION: ""
-  TEST: ""
+  TEST1: ""
+  TEST2: ""
 
 MODE: "" # --------------- Experiment mode ['train_vae', 'inference', 'test_dataloader']
 CUDA: "" # --------------- CUDA device to use: str(ID)
@@ -25,8 +26,9 @@ AUG: # -------------------- Online data augmentation
   FLIP: True # -------------- Apply random flipping?
 
 VAE_MODEL: # -------------- Variational auto encoder network
-  TYPE: "unet" # ------------ Architecture type ['unet', 'resnet']
+  TYPE: "unet" # ------------ Architecture type ['unet', 'resnet', 'plane']
   F_START: 16 # ------------- Number of features in first layer of the network
+  HAS_PARAMS: True # -------- Does the network have parameters?
 
 TRAIN: # ------------------ Parameters regarding network training
   SD_SET: "train" # --------- Training set ['train', 'all'] (for source domain)

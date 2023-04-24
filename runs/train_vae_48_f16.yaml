@@ -1,7 +1,8 @@
 PATHS:
   TRAIN: "~CONFIG/../Data/train/"
   VALIDATION: "~CONFIG/../Data/val/"
-  TEST: "~CONFIG/../Data/test/"
+  TEST1: "~CONFIG/../Data/boulders/"
+  TEST2: "~CONFIG/../Data/no_boulders/"
 
 MODE: "train_vae"
 CUDA: "0"
@@ -16,6 +17,7 @@ AUG:
   FLIP: True
 
 VAE_MODEL:
+  HAS_PARAMS: True
   TYPE: "unet"
   F_START: 16
 
@@ -46,6 +48,6 @@ CHECKPOINTS:
 OUTPUTS:
   SAVE_TRAIN: True
   SAVE_METRICS: True
-  FOLDER: "~CONFIG/results/vae_small"
+  FOLDER: "~CONFIG/results/vae_48_f16"
 
 VERSION: 1.17

@@ -1,0 +1,44 @@
+PATHS:
+  TRAIN: ""
+  VALIDATION: "~CONFIG/../Data/val/"
+  TEST1: "~CONFIG/../Data/boulders/"
+  TEST2: "~CONFIG/../Data/no_boulders/"
+
+MODE: "test_vae"
+CUDA: "0"
+
+TRAIN:
+  BTSZ: 64
+  NUM_WK: 4
+  PREFETCH_FACTOR: 16
+  LOSS:
+    TYPE: "dice"
+
+DATA:
+  SHELL_SIZE: 3
+  VOXEL_SIZE: 0.2
+  IN_SIZE: 32
+
+AUG:
+  ROTATE: False
+  FLIP: True
+
+VAE_MODEL:
+  HAS_PARAMS: False
+  TYPE: "plane"
+
+TEST:
+  NUM_POINTS: 2500
+
+CHECKPOINTS:
+  LOAD_FROM: ""
+  SAVE: False
+  LOAD: True
+  LOAD_OPT: False
+
+OUTPUTS:
+  SAVE_TRAIN: False
+  SAVE_METRICS: True
+  FOLDER: "~CONFIG/results/plane"
+
+VERSION: 1.17
