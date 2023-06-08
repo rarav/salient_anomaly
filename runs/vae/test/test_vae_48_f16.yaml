@@ -1,0 +1,20 @@
+BASE: "~CONFIG/train_vae_48_f16.yaml"
+
+MODE: "test_vae"
+CUDA: "0"
+
+TEST:
+  NUM_POINTS: 2500
+
+CHECKPOINTS:
+  LOAD_FROM: "~CONFIG/results/vae_48_f16/checkpoints/validation.pt"
+  SAVE: False
+  LOAD: True
+  LOAD_OPT: False
+
+OUTPUTS:
+  SAVE_TRAIN: False
+  SAVE_METRICS: False
+  FOLDER: "~CONFIG/results/vae_48_f16"
+
+VERSION: 1.17

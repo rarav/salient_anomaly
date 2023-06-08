@@ -1,0 +1,6 @@
+PATHS:
+  TRAIN: "~CONFIG/../Data/Training/"
+  VAL_SAL: "~CONFIG/../Data/Validation/Boulders/"
+  VAL_REG: "~CONFIG/../Data/Validation/NoBoulders/"
+  TEST_SAL: "~CONFIG/../Data/Test/Boulders/"
+  TEST_REG: "~CONFIG/../Data/Test/NoBoulders/"

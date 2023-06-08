@@ -4,15 +4,20 @@ import torch
 import matplotlib.pyplot as plt
 
 
-def visualize_dense_grid(dense_grid, name='default'):
+def visualize_dense_grid(dense_grid, name='default', colorize=True):
     colors = np.empty(dense_grid.shape, dtype=object)
-    colors[dense_grid <= 3] = 'lightsteelblue'
-    colors[np.logical_and(dense_grid > 3, dense_grid <= 6)] = 'cornflowerblue'
-    colors[np.logical_and(dense_grid > 6, dense_grid <= 10)] = 'royalblue'
-    colors[np.logical_and(dense_grid > 10, dense_grid <= 15)] = 'grey'
-    colors[np.logical_and(dense_grid > 15, dense_grid <= 20)] = 'rosybrown'
-    colors[np.logical_and(dense_grid > 20, dense_grid <= 30)] = 'darkred'
-    colors[dense_grid > 30] = 'red'
+
+    if colorize:
+        colors[dense_grid <= 3] = 'lightsteelblue'
+        colors[np.logical_and(dense_grid > 3, dense_grid <= 6)] = 'cornflowerblue'
+        colors[np.logical_and(dense_grid > 6, dense_grid <= 10)] = 'royalblue'
+        colors[np.logical_and(dense_grid > 10, dense_grid <= 15)] = 'grey'
+        colors[np.logical_and(dense_grid > 15, dense_grid <= 20)] = 'rosybrown'
+        colors[np.logical_and(dense_grid > 20, dense_grid <= 30)] = 'darkred'
+        colors[dense_grid > 30] = 'red'
+
+    else:
+        colors[dense_grid > 0] = 'lightsteelblue'
 
     ax = plt.figure(name).add_subplot(projection='3d')
     ax.voxels(dense_grid > 0, facecolors=colors, shade=False, edgecolor='black')

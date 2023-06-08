@@ -154,12 +154,14 @@ class EvalDataset(Dataset):
         crop_size = cf.DATA.IN_SIZE * cf.DATA.VOXEL_SIZE
         shell_size = cf.DATA.SHELL_SIZE
 
-        if set == 'validation':
-            pcls, names = preload(cf.PATHS.VALIDATION)
-        elif set == 'test1':
-            pcls, names = preload(cf.PATHS.TEST1)
-        elif set == 'test2':
-            pcls, names = preload(cf.PATHS.TEST2)
+        if set == 'val_reg':
+            pcls, names = preload(cf.PATHS.VAL_REG)
+        elif set == 'val_sal':
+            pcls, names = preload(cf.PATHS.VAL_SAL)
+        elif set == 'test_reg':
+            pcls, names = preload(cf.PATHS.TEST_REG)
+        elif set == 'test_sal':
+            pcls, names = preload(cf.PATHS.TEST_SAL)
         else:
             raise ValueError(f'Unknown set {set}')
 
@@ -175,31 +177,54 @@ class EvalDataset(Dataset):
         for cloud_name in names:
             self.clouds_num_points[cloud_name] = 0
 
-        np.random.seed(0)
-        random.seed(0)
-        for i in range(self.ds_size):
-            r = random.randrange(0, num_clouds)
-            pcl = pcls[r]
-            num_points = pcl.shape[0]
-            center = pcl[random.randrange(0, num_points), :]  # 3,
+        if self.ds_size > 0:
+            np.random.seed(0)
+            random.seed(0)
 
-            min_bound = center - crop_size / 2.0
-            max_bound = min_bound + crop_size - voxel_size / 2
-            crop = crop_pcl(pcl, min_bound, max_bound)
+            for i in range(self.ds_size):
+                r = random.randrange(0, num_clouds)
+                pcl = pcls[r]
+                num_points = pcl.shape[0]
+                center = pcl[random.randrange(0, num_points), :]  # 3,
 
-            dense_grid = np.zeros((side_length, side_length, side_length))
-            shell_grid = np.zeros((side_length, side_length, side_length))
-            voxelise(dense_grid, crop, min_bound, voxel_size)
+                min_bound = center - crop_size / 2.0
+                max_bound = min_bound + crop_size - voxel_size / 2
+                crop = crop_pcl(pcl, min_bound, max_bound)
 
-            # dense_grid = np.clip(dense_grid,0,1)
+                dense_grid = np.zeros((side_length, side_length, side_length))
+                shell_grid = np.zeros((side_length, side_length, side_length))
+                voxelise(dense_grid, crop, min_bound, voxel_size)
 
-            create_shell(shell_grid, dense_grid, shell_size)
+                # dense_grid = np.clip(dense_grid,0,1)
 
-            self.voxel_grids.append(dense_grid)
-            self.shell_grids.append(shell_grid)
-            self.coordinates.append(center)
-            self.cloud_names.append(names[r])
-            self.clouds_num_points[names[r]] += 1
+                create_shell(shell_grid, dense_grid, shell_size)
+
+                self.voxel_grids.append(dense_grid)
+                self.shell_grids.append(shell_grid)
+                self.coordinates.append(center)
+                self.cloud_names.append(names[r])
+                self.clouds_num_points[names[r]] += 1
+
+        else: # load all points
+            for pcl, name in zip(pcls, names):
+                num_points = pcl.shape[0]
+                for i in range(num_points):
+                    center = pcl[i, :]
+                    min_bound = center - crop_size / 2.0
+                    max_bound = min_bound + crop_size - voxel_size / 2
+                    crop = crop_pcl(pcl, min_bound, max_bound)
+
+                    dense_grid = np.zeros((side_length, side_length, side_length))
+                    shell_grid = np.zeros((side_length, side_length, side_length))
+
+                    voxelise(dense_grid, crop, min_bound, voxel_size)
+                    create_shell(shell_grid, dense_grid, shell_size)
+
+                    self.voxel_grids.append(dense_grid)
+                    self.shell_grids.append(shell_grid)
+                    self.coordinates.append(center)
+                    self.cloud_names.append(name)
+                    self.clouds_num_points[name] += 1
 
         print('Preloaded clouds', self.clouds_num_points)
 

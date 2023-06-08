@@ -9,9 +9,10 @@
 
 PATHS: # ----------------- Contains the absolute or relative data paths to dataset folders
   TRAIN: ""
-  VALIDATION: ""
-  TEST1: ""
-  TEST2: ""
+  VAL_SAL: ""
+  VAL_REG: ""
+  TEST_SAL: ""
+  TEST_REG: ""
 
 MODE: "" # --------------- Experiment mode ['train_vae', 'inference', 'test_dataloader']
 CUDA: "" # --------------- CUDA device to use: str(ID)

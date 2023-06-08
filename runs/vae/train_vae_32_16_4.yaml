@@ -1,0 +1,50 @@
+BASE: ~CONFIG/../local_paths.yaml
+
+MODE: train_vae
+CUDA: 0
+
+DATA:
+  SHELL_SIZE: 3
+  VOXEL_SIZE: 0.2
+  IN_SIZE: 32
+
+AUG:
+  ROTATE: True
+  FLIP: True
+
+VAE_MODEL:
+  TYPE: unet
+  F_START: 16
+  HAS_PARAMS: True
+
+TRAIN:
+  IT_P_EP: 1000
+  N_EP_MAX: 100
+  EARLY_STOPPING_EP: 10
+  BTSZ: 16
+  NUM_WK: 4
+  PREFETCH_FACTOR: 16
+  LOSS:
+    TYPE: dice
+  VAE:
+    OPTIM: adam
+    LR: 0.0001
+    BETA1: 0.0
+    BETA2: 0.999
+    WDEC: 0.0
+
+TEST:
+  NUM_POINTS: 5000
+
+CHECKPOINTS:
+  LOAD_FROM: 
+  SAVE: True
+  LOAD: True
+  LOAD_OPT: True
+
+OUTPUTS:
+  SAVE_TRAIN: True
+  SAVE_METRICS: True
+  FOLDER: ~CONFIG/results/vae_32_16_4
+
+VERSION: 1.17

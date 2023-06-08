@@ -1,0 +1,21 @@
+BASE: "~CONFIG/../test_plane_24.yaml"
+
+MODE: "inference"
+CUDA: "0"
+
+TRAIN:
+  BTSZ: 64
+
+TEST:
+  NUM_POINTS: -1
+  STRIDE: 10
+  PATH: "~CONFIG/../../../Data/Training/120034_0.las"
+  OUT_PATH: "~CONFIG/../../inference/120034_0_saly_plane_24.las"
+
+CHECKPOINTS:
+  SAVE: False
+  LOAD: True
+  LOAD_OPT: False
+
+OUTPUTS:
+  FOLDER: "~CONFIG/../../inference"

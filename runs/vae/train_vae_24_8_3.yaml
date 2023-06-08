@@ -1,25 +1,21 @@
-PATHS:
-  TRAIN: "~CONFIG/../Data/train/"
-  VALIDATION: "~CONFIG/../Data/val/"
-  TEST1: "~CONFIG/../Data/boulders/"
-  TEST2: "~CONFIG/../Data/no_boulders/"
+BASE: ~CONFIG/../local_paths.yaml
 
-MODE: "train_vae"
-CUDA: "0"
+MODE: train_vae
+CUDA: 0
 
 DATA:
   SHELL_SIZE: 3
   VOXEL_SIZE: 0.2
-  IN_SIZE: 48
+  IN_SIZE: 24
 
 AUG:
-  ROTATE: False
+  ROTATE: True
   FLIP: True
 
 VAE_MODEL:
+  TYPE: unet
+  F_START: 8
   HAS_PARAMS: True
-  TYPE: "unet"
-  F_START: 16
 
 TRAIN:
   IT_P_EP: 1000
@@ -29,18 +25,19 @@ TRAIN:
   NUM_WK: 4
   PREFETCH_FACTOR: 16
   LOSS:
-    TYPE: "dice"
+    TYPE: dice
   VAE:
-    OPTIM: "adam"
+    OPTIM: adam
     LR: 0.0001
     BETA1: 0.0
     BETA2: 0.999
     WDEC: 0.0
+
 TEST:
-  NUM_POINTS: 2500
+  NUM_POINTS: 5000
 
 CHECKPOINTS:
-  LOAD_FROM: ""
+  LOAD_FROM: 
   SAVE: True
   LOAD: True
   LOAD_OPT: True
@@ -48,6 +45,6 @@ CHECKPOINTS:
 OUTPUTS:
   SAVE_TRAIN: True
   SAVE_METRICS: True
-  FOLDER: "~CONFIG/results/vae_48_f16"
+  FOLDER: ~CONFIG/results/vae_24_8_3
 
 VERSION: 1.17

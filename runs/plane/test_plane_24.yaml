@@ -1,8 +1,8 @@
+BASE: ~CONFIG/../local_paths.yaml
 PATHS:
   TRAIN: ""
-  VALIDATION: "~CONFIG/../Data/val/"
-  TEST1: "~CONFIG/../Data/boulders/"
-  TEST2: "~CONFIG/../Data/no_boulders/"
+  VAL_SAL: ""
+  VAL_REG: ""
 
 MODE: "test_vae"
 CUDA: "0"
@@ -17,7 +17,7 @@ TRAIN:
 DATA:
   SHELL_SIZE: 3
   VOXEL_SIZE: 0.2
-  IN_SIZE: 32
+  IN_SIZE: 24
 
 AUG:
   ROTATE: False
@@ -28,7 +28,7 @@ VAE_MODEL:
   TYPE: "plane"
 
 TEST:
-  NUM_POINTS: 2500
+  NUM_POINTS: 25000
 
 CHECKPOINTS:
   LOAD_FROM: ""
@@ -39,6 +39,6 @@ CHECKPOINTS:
 OUTPUTS:
   SAVE_TRAIN: False
   SAVE_METRICS: True
-  FOLDER: "~CONFIG/results/plane"
+  FOLDER: "~CONFIG/results/plane_24"
 
 VERSION: 1.17

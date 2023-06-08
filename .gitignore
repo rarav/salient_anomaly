@@ -2,7 +2,7 @@
 /.idea/*
 /Data/*
 /runs/def
-/runs/results
 /runs/inference
-/runs/vae_base
+/runs/vae/results/*
+/runs/plane/results/*
 /__pycache__

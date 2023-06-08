@@ -35,10 +35,15 @@ class ExperimentHandler:
 
     tds: Dataset
     tdl: DataLoader
-    vds: EvalDataset
-    vdl: DataLoader
-    tsds: EvalDataset
-    tsdl: DataLoader
+
+    vds_sal: EvalDataset
+    vdl_sal: DataLoader
+    tsds_sal: EvalDataset
+    tsdl_sal: DataLoader
+    vds_reg: EvalDataset
+    vdl_reg: DataLoader
+    tsds_reg: EvalDataset
+    tsdl_reg: DataLoader
 
     # ============================================================================================================ INIT
 
@@ -100,7 +105,7 @@ class ExperimentHandler:
         """
         self.e, self.e_es = -1, -1
         self.train_start_time = -1.0
-        self.scores = {'validation': 1.0, }
+        self.scores = {'validation_ratio': 0.0, }
 
         # =============================================================================================== EXPERIMENT SETUPS
 
@@ -115,15 +120,18 @@ class ExperimentHandler:
         if cf.PATHS.TRAIN:
             self.tds = TrainingDataset(cf)
             self.tdl = DL_t(dataset=self.tds)
-        if cf.PATHS.VALIDATION:
-            self.vds = EvalDataset(cf, 'validation')
-            self.vdl = DL_v(dataset=self.vds)
-        if cf.PATHS.TEST1:
-            self.tsds1 = EvalDataset(cf, 'test1')
-            self.tsdl1 = DL_v(dataset=self.tsds1)
-        if cf.PATHS.TEST2:
-            self.tsds2 = EvalDataset(cf, 'test2')
-            self.tsdl2 = DL_v(dataset=self.tsds2)
+        if cf.PATHS.VAL_SAL:
+            self.vds_sal = EvalDataset(cf, 'val_sal')
+            self.vdl_sal = DL_v(dataset=self.vds_sal)
+        if cf.PATHS.VAL_REG:
+            self.vds_reg = EvalDataset(cf, 'val_reg')
+            self.vdl_reg = DL_v(dataset=self.vds_reg)
+        if cf.PATHS.TEST_SAL:
+            self.tsds_sal = EvalDataset(cf, 'test_sal')
+            self.tsdl_sal = DL_v(dataset=self.tsds_sal)
+        if cf.PATHS.TEST_REG:
+            self.tsds_reg = EvalDataset(cf, 'test_reg')
+            self.tsdl_reg = DL_v(dataset=self.tsds_reg)
 
     def load_checkpoint(self):
         """Loads a checkpoint.
@@ -207,7 +215,7 @@ class ExperimentHandler:
         """
 
         if self.cf.VAE_MODEL.TYPE == 'unet':
-            self.vae = model.Autoencoder3D(self.cf, self.device)
+            self.vae = model.Autoencoder3D(self.cf, self.device)  # <<<<<<<
         elif self.cf.VAE_MODEL.TYPE == 'resnet':
             self.vae = model.Autoencoder3DRes(self.cf, self.device)
         elif self.cf.VAE_MODEL.TYPE == 'plane':
@@ -277,37 +285,52 @@ class ExperimentHandler:
 
     def evaluate_on_subset(self, subset):
         if subset == 'validation':
-            if not self.cf.PATHS.VALIDATION: return
-            dl = self.vdl
+            if not self.cf.PATHS.VAL_REG: return
+            dl_sal = self.vdl_sal
+            dl_reg = self.vdl_reg
             update_es = True
-        elif subset == 'test1':
-            if not self.cf.PATHS.TEST1: return
-            dl = self.tsdl1
+        elif subset == 'test':
+            if not self.cf.PATHS.TEST_SAL: return
+            dl_sal = self.tsdl_sal
+            dl_reg = self.tsdl_reg
             update_es = False
         else:
-            if not self.cf.PATHS.TEST2: return
-            dl = self.tsdl2
-            update_es = False
+            raise NotImplementedError(f"Subset {subset} is not supported")
 
-        recon_errors = []
-        for batch in dl:
+        recon_errors_sal = []
+        for batch in dl_sal:
             dense = batch['dense'].to(self.device, non_blocking=True)
             shell = batch['shell'].to(self.device, non_blocking=True)
             with torch.no_grad():
                 recons = self.vae(shell)
                 loss = self.loss(recons, dense, keep_batch_axis=True)
-            recon_errors.extend(tensor2numpy(loss))
+            recon_errors_sal.extend(tensor2numpy(loss))
 
-        avg_error = float(np.mean(np.array(recon_errors)))
-        print(f"Average reconstruction error on subset {subset}: {avg_error:.3f}")
+        avg_error_sal = float(np.mean(np.array(recon_errors_sal)))
+
+        recon_errors_reg = []
+        for batch in dl_reg:
+            dense = batch['dense'].to(self.device, non_blocking=True)
+            shell = batch['shell'].to(self.device, non_blocking=True)
+            with torch.no_grad():
+                recons = self.vae(shell)
+                loss = self.loss(recons, dense, keep_batch_axis=True)
+            recon_errors_reg.extend(tensor2numpy(loss))
+
+        avg_error_reg = float(np.mean(np.array(recon_errors_reg)))
+        ratio = avg_error_sal / avg_error_reg
+
+        print(
+            f"Avg. rec. error on subset {subset} sal/reg, ratio: {avg_error_sal:.3f}/{avg_error_reg:.3f}, {ratio:.3f}")
+
         if self.cf.OUTPUTS.SAVE_METRICS:
             with open(pjoin(self.F['metrics'], f"{subset}-{self.e}.loss"), 'wb') as f:
-                pickle.dump(avg_error, f)
+                pickle.dump((avg_error_sal, avg_error_reg, ratio), f)
 
         if update_es:
-            min_val_recon = self.scores['validation']
-            if avg_error < min_val_recon:
-                self.scores['validation'] = avg_error
+            min_val_recon = self.scores['validation_ratio']
+            if ratio > min_val_recon:
+                self.scores['validation_ratio'] = ratio
                 self.e_es = 0
                 self.may_save_model('validation.pt', net_only=True)
 
@@ -419,8 +442,7 @@ class ExperimentHandler:
             self.save_training_samples(shell, recons, dense)
 
             self.evaluate_on_subset('validation')
-            self.evaluate_on_subset('test1')
-            self.evaluate_on_subset('test2')
+            self.evaluate_on_subset('test')
             self.may_save_model('latest.pt')
 
     def test_vae(self):
@@ -431,11 +453,8 @@ class ExperimentHandler:
 
         self.prepare_datasets()
         vae.eval()
-
         self.evaluate_on_subset('validation')
-        self.evaluate_on_subset('test1')
-        self.evaluate_on_subset('test2')
-        self.may_save_model('latest.pt')
+        self.evaluate_on_subset('test')
 
     def inference(self):
         vae = self.init_network(make_optimizer=False)

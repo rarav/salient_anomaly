@@ -44,9 +44,10 @@ class Config(object):
     # START OF AUTOMATED CODE
     class PROT_PATHS(object):
         TRAIN: str
-        VALIDATION: str
-        TEST1: str
-        TEST2: str
+        VAL_SAL: str
+        VAL_REG: str
+        TEST_SAL: str
+        TEST_REG: str
 
     PATHS = PROT_PATHS()
 

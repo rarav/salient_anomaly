@@ -1,0 +1,24 @@
+BASE: "~CONFIG/../train_vae_24_16_1.yaml"
+PATHS:
+  TRAIN: ""
+  VAL_SAL: ""
+  VAL_REG: ""
+
+MODE: "test_vae"
+CUDA: "0"
+
+TEST:
+  NUM_POINTS: 25000
+
+CHECKPOINTS:
+  LOAD_FROM: "~CONFIG/../results/vae_24_16_1/checkpoints/validation.pt"
+  SAVE: False
+  LOAD: True
+  LOAD_OPT: False
+
+OUTPUTS:
+  SAVE_TRAIN: False
+  SAVE_METRICS: False
+  FOLDER: "~CONFIG/../results/vae_24_16_1"
+
+VERSION: 1.17

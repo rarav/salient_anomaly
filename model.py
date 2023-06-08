@@ -107,6 +107,7 @@ class Autoencoder3D(nn.Module):
         super(Autoencoder3D, self).__init__()
 
         f1 = cf.VAE_MODEL.F_START
+        print(f1)
         f2 = f1 * 2
         f4 = f1 * 4
         self.shift = (cf.DATA.IN_SIZE ** 2 - (cf.DATA.IN_SIZE - 2 * cf.DATA.SHELL_SIZE) ** 2) / cf.DATA.IN_SIZE ** 3
@@ -114,19 +115,19 @@ class Autoencoder3D(nn.Module):
 
         pm = 'zeros'
 
-        self.b1 = nn.Sequential(  # -------------------------------------- shape: 32^3
+        self.b1 = nn.Sequential(  # -------------------------------------- shape: 32^3 / 24^3
             nn.Conv3d(1, f1, (3, 3, 3), padding=1, padding_mode='zeros'),
             nn.LeakyReLU(inplace=True),
             nn.Conv3d(f1, f1, (3, 3, 3), padding=1, padding_mode=pm),
             nn.LeakyReLU(inplace=True),
         )
-        self.b2 = nn.Sequential(  # -------------------------------------- shape: 16^3
+        self.b2 = nn.Sequential(  # -------------------------------------- shape: 16^3 / 12^3
             nn.Conv3d(f1, f2, (3, 3, 3), padding=1, padding_mode=pm),
             nn.LeakyReLU(inplace=True),
             nn.Conv3d(f2, f2, (3, 3, 3), padding=1, padding_mode=pm),
             nn.LeakyReLU(inplace=True),
         )
-        self.b3 = nn.Sequential(  # -------------------------------------- shape: 8^3
+        self.b3 = nn.Sequential(  # -------------------------------------- shape: 8^3 / 6^3
             nn.Conv3d(f2, f4, (3, 3, 3), padding=1, padding_mode=pm),
             nn.LeakyReLU(inplace=True),
             nn.Conv3d(f4, f4, (3, 3, 3), padding=1, padding_mode=pm),
@@ -135,14 +136,14 @@ class Autoencoder3D(nn.Module):
             nn.LeakyReLU(inplace=True),
         )
 
-        self.b4 = nn.Sequential(  # -------------------------------------- shape: 16^3
+        self.b4 = nn.Sequential(  # -------------------------------------- shape: 16^3 / 12^3
             nn.Conv3d(f4, f2, (3, 3, 3), padding=1, padding_mode=pm),
             nn.LeakyReLU(inplace=True),
             nn.Conv3d(f2, f1, (3, 3, 3), padding=1, padding_mode=pm),
             nn.LeakyReLU(inplace=True),
         )
 
-        self.b5 = nn.Sequential(  # -------------------------------------- shape: 32^3
+        self.b5 = nn.Sequential(  # -------------------------------------- shape: 32^3 / 24^3
             nn.Conv3d(f2, f1, (3, 3, 3), padding=1, padding_mode=pm),
             nn.LeakyReLU(inplace=True),
             nn.Conv3d(f1, 1, (3, 3, 3), padding=1, padding_mode=pm),
