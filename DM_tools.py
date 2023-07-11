@@ -1,7 +1,7 @@
 from __future__ import print_function
 
 from opals import pyDM
-import sys
+import sys, os, warnings, datetime
 import numpy as np
 from tqdm import tqdm
 
@@ -158,94 +158,6 @@ def odm2o3d(odm, attributes_dict=None, print_attributes=False):
 
     return pcd, np_dict
 
-# def o3d2odm(points, odm, attributes_dict=None, print_attributes=False):
-#     """
-#     Converts odm to open3d using the coordinates as coordinates
-#     Other features are returned as numpy dict, if required in attributes_dict
-#
-#     :param points: points to convert to the odm
-#     :param odm: path to the odm
-#     :param attributes_dict: attributes of interest that should be converted
-#     :param print_attributes: print all attributes in the odm
-#
-#     :type odm: str
-#     :type attributes_dict: dict (of strings)
-#     :type print_attributes: bool
-#
-#     :return: open3d pcl object, numpy dict of the desired attributes
-#     """
-#     import open3d as o3d
-#
-#     # pyDM.Datamanager.load parameter: filename(string), readOnly(bool) threadSafety(bool)
-#     dm = pyDM.Datamanager.load(odm, False, False)
-#     if not dm:
-#         print("Unable to open ODM '" + odm + "'")
-#         dm = pyDM.Datamanager.create(odm, False)
-#         if not dm:
-#             print("Unable to create ODM '" + odm + "'")
-#             sys.exit(1)
-#
-#     # build layout for retrieving echo width values (subset of odm attributes)
-#     lf = pyDM.AddInfoLayoutFactory()
-#     for att in attributes_dict.key():
-#         lf.addColumn(pyDM.ColumnType.float_, att)
-#
-#     layoutRead = lf.getLayout()
-#     layoutWrite = lf.getLayout()
-#
-#     print("Get odm echo width as numpy object...")
-#     # create dictionary of numpy objects
-#     numpyDict = pyDM.NumpyConverter.createNumpyDict(dm.sizePoint(), layoutRead, False)
-#     print("len(numpyDict)=", len(numpyDict))
-#     pointindex = dm.getPointIndex()
-#
-#     # fill numpy dictionary with all leafs of the ODM point index
-#     rowIdx = 0
-#     count = float(pointindex.sizeLeaf())
-#     for idx, leaf in enumerate(pointindex.leafs()):
-#         print("%5.1f%% finished" % (idx / count * 100.))
-#         rowIdx += pyDM.NumpyConverter.fillNumpyDict(numpyDict, rowIdx, leaf)
-#
-#     print("100.0% finished.", rowIdx, "values have been converted")
-#
-#     print("\nCompute min max echo width for single echos using numpy...")
-#     mask = numpyDict["NrOfEchos"] == 1  # generate single echo mask
-#     minValue = (numpyDict["EchoWidth"][mask]).min()
-#     maxValue = (numpyDict["EchoWidth"][mask]).max()
-#     print("\tmin=%.2f" % minValue)
-#     print("\tmax=%.2f" % maxValue)
-#
-#     # compute parameter of linear transform function
-#     k = 1. / (maxValue - minValue)
-#     d = -minValue * k
-#     normalizedEchoWidth = numpyDict["EchoWidth"] * k + d
-#
-#     # check if linear transform function
-#     minCheck = (normalizedEchoWidth[mask]).min();
-#     assert abs(minCheck) < 1e-10
-#     maxCheck = (normalizedEchoWidth[mask]).max();
-#     assert abs(maxCheck - 1) < 1e-10
-#
-#     # store normalized echo width values within the odm
-#     storeDict = {}
-#     storeDict["_normalizedEchoWidth"] = normalizedEchoWidth
-#     print("\nStore normalised echo width values in ODM...")
-#     for idx, leaf in enumerate(pointindex.leafs()):
-#         print("%5.1f%% finished" % (idx / count * 100.))
-#
-#         # pyDM.NumpyConverter.setFromNumpyDict( numpyDict, translators, leaf, layout, filter = None)
-#         # for details on the function, please refer to the docu
-#         pyDM.NumpyConverter.setFromNumpyDict(storeDict, [], leaf, layoutWrite)  # we don't need translators in this case
-#
-#         # mark leaf as changed/dirty that it will be written do disk again
-#         leaf.setChanged(True)
-#
-#     print("100.0% finished.")
-#
-#     print("\nSave odm...")
-#     dm.save()
-#     print("finished")
-
 def __polylgon2DM(polypoints):
     """
     Creates a polygon to be added to an  odm
@@ -289,12 +201,6 @@ def polygons2odm(polygons_list, odm):
     return dm
 
 
-
-
-
-
-
-
 def reverseZ(odm):
     """
     Reverses Z ordinate (saves to the same odm)
@@ -317,3 +223,153 @@ def reverseZ(odm):
         dm.replacePoint(pt)
     dm.save()
     print('z was reversed')
+
+#--------------- QA - pearson coefficient computation ---------------
+class correlation_kernel(pyDM.KernelPointEx):
+    """callback object computing an user-defined attribute '_K_nonparam'"""
+    _radius = None
+    _pcl2 = None
+    _attribute = None
+
+    def __init__(self):
+        """
+        initialize the kernel process, and set constant parameters
+
+        """
+
+        # initialize the base class (mandatory!)
+        if sys.version_info >= (3, 0):
+            super().__init__()
+        else:
+            super(correlation_kernel, self).__init__()
+        return
+
+    def setArgs(self, pcl2, attribute, radius):
+        """
+        Sets the class private arguments the second pcl and the feature
+
+        :param pcl2: the kdtree of the point cloud to cross correlate with
+        :param dm2: the odm of the second point cloud
+        :param attribute: the feature to evaluate the correlation to
+        :param radius: radius of search
+
+        :type pcl2: kdtree
+        :type dm2: odm
+        :type attribute: str
+        :type nncount: int
+        :type radius: float
+        """
+        self._kd_pcl2 = pcl2
+        # self._odm_pcl2 = dm2
+        self._feature = attribute
+
+        self._search_dist = radius
+
+    def tileFilter(self):
+        return None
+    def releaseLeaf(self):
+        """
+        """
+        return
+
+    def leafChanged(self, leaf, *args, **kwargs):
+        """callback notifies about a changed leaf"""
+        # print("process tile with id = %d" % leaf.id())
+        return
+
+    def process(self, pt, neighbours):
+        r"""
+        callback for computing a point's cross correlation
+
+        """
+        # find the points from the second point cloud
+        searchMode = pyDM.SelectionMode.nearest
+        nncount = neighbours.sizePoint()
+        pts2 = self._kd_pcl2.searchPoint(nncount, pt, self._search_dist, searchMode)
+
+        # extract feature values from each point neighbourhood (both pcls)
+        pts2_dict = pts2.asNumpyDict()
+        f2 = pts2_dict[self._feature]
+        f2_f2_ = f2 - np.mean(f2)
+
+        pts1_dict = neighbours.asNumpyDict()
+        f1 = pts1_dict[self._feature]
+        f1_f1_ = f1 - np.mean(f1)
+        # compute the cross correlation
+        r_enum = (f1_f1_).dot(f2_f2_.T)
+        r_denom = np.sqrt(f1_f1_.dot(f1_f1_.T)) * np.sqrt((f2_f2_.dot(f2_f2_.T)))
+        r = r_enum/r_denom
+        pt.info().set(1, r)
+
+        return True
+
+def DM_correlate(pcl1, pcl2, attribute, radius, **kwargs):
+    r"""
+    Compute the Pearson correlation coefficient of a specific feature between two point clouds.
+
+    .. math:
+        r_{xy}={\frac {\sum _{i=1}^{n}(x_{i}-{\bar {x}})(y_{i}-{\bar {y}})}{{\sqrt {\sum _{i=1}^{n}(x_{i}-{\bar {x}})^{2}}}{\sqrt {\sum _{i=1}^{n}(y_{i}-{\bar {y}})^{2}}}}}}
+
+    with :math:`x_i` the feature value from the first point cloud, and :math:`y_i` the feature value from second point cloud
+
+    The result is inserted into the odm of pcl1 under a new feature "_pearson_pcl2", where "pcl2" is the name of the pcl2 filename
+
+    :param pcl1: path to the odm file of the first point cloud
+    :param pcl2: path to the odm file of the second point cloud
+    :param attribute: the feature for which the (normalized) cross correlation should be evaluated
+    :param radius: the radius of the sphere in which the cross correlation should be evalutated.
+
+    :type pcl1: str
+    :type pcl2: str
+    :type attribute: str
+    :type radius: float
+    :type nncount: int
+
+    :return:
+    """
+    from opals import Import
+    try:
+        dm = pyDM.Datamanager.load(pcl1 + '.odm', False, False)
+        dm2 = pyDM.Datamanager.load(pcl2 + '.odm', False, False)
+    except IOError as e:
+        print(e)
+
+    pcl1_head_tail = os.path.split(pcl1)
+    pcl2_head_tail = os.path.split(pcl2)
+
+    # initialize an empty layout
+    lf = pyDM.AddInfoLayoutFactory()
+
+    lf.addColumn(pyDM.ColumnType.float_, '_' + attribute)  # column 0
+    lf.addColumn(pyDM.ColumnType.int32, "_pearson" + pcl2_head_tail[1][:-3] )  # column 1
+
+    layout = lf.getLayout()
+
+    # create spatial selection
+    # define the shape in which the neighbourhood will be searched
+    search_shape = 'sphere(r=' + str(radius) + ')'
+    query = pyDM.QueryDescriptor(search_shape)  # creates the query according to the shape defined
+
+    # define a kd-tree to enable search within pcl2
+    # kdtree = pyDM.PointIndexLeaf(pyDM.IndexType.kdtree,3,True)  # index type, dimension, thread safety
+    # kdtree.addPoint(dm2.points())
+
+    r = correlation_kernel()
+    r.setArgs(pcl2=dm2, attribute=attribute, radius=radius)
+    start = datetime.datetime.now()
+    # create processor according to which the kernel will run (sends a point and its neighbours to the kernel)
+    processor = pyDM.ProcessorEx(dm, query, None, layout, False, None, None, False)
+    print("Computing cross correlation... ")
+    print('Process started at', datetime.datetime.now().strftime('%H:%M:%S'))
+
+    processor.run(r)  # perform computation
+
+    diff = datetime.datetime.now() - start
+
+    print("Done. Cross correlation took %.2f [s]" % diff.total_seconds())
+
+    # save manager object
+    print("Save...")
+    dm.save()
+
+    return dm
