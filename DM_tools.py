@@ -244,12 +244,10 @@ class correlation_kernel(pyDM.KernelPointEx):
             super(correlation_kernel, self).__init__()
         return
 
-    def setArgs(self, pcl2, attribute, radius):
+    def setArgs(self, attribute, radius):
         """
         Sets the class private arguments the second pcl and the feature
 
-        :param pcl2: the kdtree of the point cloud to cross correlate with
-        :param dm2: the odm of the second point cloud
         :param attribute: the feature to evaluate the correlation to
         :param radius: radius of search
 
@@ -259,10 +257,7 @@ class correlation_kernel(pyDM.KernelPointEx):
         :type nncount: int
         :type radius: float
         """
-        self._kd_pcl2 = pcl2
-        # self._odm_pcl2 = dm2
         self._feature = attribute
-
         self._search_dist = radius
 
     def tileFilter(self):
@@ -282,28 +277,58 @@ class correlation_kernel(pyDM.KernelPointEx):
         callback for computing a point's cross correlation
 
         """
-        # find the points from the second point cloud
-        searchMode = pyDM.SelectionMode.nearest
-        nncount = neighbours.sizePoint()
-        pts2 = self._kd_pcl2.searchPoint(nncount, pt, self._search_dist, searchMode)
-
         # extract feature values from each point neighbourhood (both pcls)
-        pts2_dict = pts2.asNumpyDict()
-        f2 = pts2_dict[self._feature]
-        f2_f2_ = f2 - np.mean(f2)
+        neighbours_dict = neighbours.asNumpyDict()
 
-        pts1_dict = neighbours.asNumpyDict()
-        f1 = pts1_dict[self._feature]
-        f1_f1_ = f1 - np.mean(f1)
+        pts1_idx = np.where(neighbours_dict['FileId'] == 1)[0]
+        pts2_idx = np.where(neighbours_dict['FileId'] == 2)[0]
+
+        # match array sizes (assuming neighbours are sorted from closest):
+        if pts1_idx.shape[0] > pts2_idx.shape[0]:
+            pts1_idx = pts1_idx[:pts2_idx.shape[0]]
+
+        elif pts2_idx.shape[0] > pts1_idx.shape[0]:
+            pts2_idx = pts2_idx[:pts1_idx.shape[0]]
+
+        f2 = neighbours_dict[self._feature][pts2_idx]
+        f1 = neighbours_dict[self._feature][pts1_idx]
+
+        f2[np.abs(f2) < 1e-10] = 0
+        f1[np.abs(f1) < 1e-10] = 0
+        f2[np.abs(f2) > 1e+10] = 1
+        f1[np.abs(f1) > 1e+10] = 1
+
+        # normalize the values
+        f1_normalized = (f1 - np.min(f1)) / (np.max(f1) - np.min(f1) + 0.00001)
+        f2_normalized = (f2 - np.min(f2)) / (np.max(f2) - np.min(f2) + 0.00001)
+
+        f2_mean = f2_normalized - np.mean(f2_normalized)
+        f1_mean = f1_normalized - np.mean(f1_normalized)
+
         # compute the cross correlation
-        r_enum = (f1_f1_).dot(f2_f2_.T)
-        r_denom = np.sqrt(f1_f1_.dot(f1_f1_.T)) * np.sqrt((f2_f2_.dot(f2_f2_.T)))
-        r = r_enum/r_denom
-        pt.info().set(1, r)
+        r_enum = np.abs((f1_mean).dot(f2_mean.T))
+        r_denom = np.sqrt(f1_mean.dot(f1_mean.T)) * np.sqrt((f2_mean.dot(f2_mean.T)))
+        r = r_enum/(r_denom + 0.000001)
 
+        if np.abs(r) < 1e-10:
+            r=0.
+        elif np.isnan(r):
+            r=0.
+            print('NCC is nan, set to zero')
+        # print(r)
+        # r= np.round(r, decimals=2)
+        pt.info().set(2, r)
+        print(r)
+
+        # compute the local sparsity
+        s1_local = 1/np.mean(f1_normalized +0.000001)
+        s2_local = 1/np.mean(f2_normalized)+0.000001
+        s_relative = s1_local/s2_local
+        pt.info().set(3, s1_local)
+        pt.info().set(4,s_relative)
         return True
 
-def DM_correlate(pcl1, pcl2, attribute, radius, **kwargs):
+def DM_correlate(merged_odm, attribute, radius, **kwargs):
     r"""
     Compute the Pearson correlation coefficient of a specific feature between two point clouds.
 
@@ -314,8 +339,7 @@ def DM_correlate(pcl1, pcl2, attribute, radius, **kwargs):
 
     The result is inserted into the odm of pcl1 under a new feature "_pearson_pcl2", where "pcl2" is the name of the pcl2 filename
 
-    :param pcl1: path to the odm file of the first point cloud
-    :param pcl2: path to the odm file of the second point cloud
+    :param merged_odm: path to the odm file that includes both pcls
     :param attribute: the feature for which the (normalized) cross correlation should be evaluated
     :param radius: the radius of the sphere in which the cross correlation should be evalutated.
 
@@ -327,22 +351,20 @@ def DM_correlate(pcl1, pcl2, attribute, radius, **kwargs):
 
     :return:
     """
-    from opals import Import
+
     try:
-        dm = pyDM.Datamanager.load(pcl1 + '.odm', False, False)
-        dm2 = pyDM.Datamanager.load(pcl2 + '.odm', False, False)
+        dm = pyDM.Datamanager.load(merged_odm + '.odm', False, False)
+
     except IOError as e:
         print(e)
 
-    pcl1_head_tail = os.path.split(pcl1)
-    pcl2_head_tail = os.path.split(pcl2)
-
     # initialize an empty layout
     lf = pyDM.AddInfoLayoutFactory()
-
-    lf.addColumn(pyDM.ColumnType.float_, '_' + attribute)  # column 0
-    lf.addColumn(pyDM.ColumnType.int32, "_pearson" + pcl2_head_tail[1][:-3] )  # column 1
-
+    lf.addColumn(pyDM.ColumnSemantic.FileId)  # column 0
+    lf.addColumn(pyDM.ColumnType.float_, '_' + attribute)  # column 1
+    lf.addColumn(pyDM.ColumnType.double_, "_pearson")  # column 2
+    lf.addColumn(pyDM.ColumnType.double_, "_s_local")  # column 3
+    lf.addColumn(pyDM.ColumnType.double_, "_s_relative")  # column 4
     layout = lf.getLayout()
 
     # create spatial selection
@@ -355,17 +377,19 @@ def DM_correlate(pcl1, pcl2, attribute, radius, **kwargs):
     # kdtree.addPoint(dm2.points())
 
     r = correlation_kernel()
-    r.setArgs(pcl2=dm2, attribute=attribute, radius=radius)
+    r.setArgs(attribute='_' + attribute, radius=radius)
     start = datetime.datetime.now()
+
     # create processor according to which the kernel will run (sends a point and its neighbours to the kernel)
-    processor = pyDM.ProcessorEx(dm, query, None, layout, False, None, None, False)
+    processFilter = pyDM.Filter('Generic[FileId==1]')
+    processor = pyDM.ProcessorEx(dm, query, processFilter , layout, False, None, None, False)
     print("Computing cross correlation... ")
     print('Process started at', datetime.datetime.now().strftime('%H:%M:%S'))
 
     processor.run(r)  # perform computation
 
     diff = datetime.datetime.now() - start
-
+    print('Process ended at', datetime.datetime.now().strftime('%H:%M:%S'))
     print("Done. Cross correlation took %.2f [s]" % diff.total_seconds())
 
     # save manager object

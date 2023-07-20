@@ -13,7 +13,7 @@ TEST:
   OUT_PATH: "~CONFIG/../../inference/120034_0_saly_vae_24_16_1.las"
 
 CHECKPOINTS:
-  LOAD_FROM: "~CONFIG/../results/vae_24_16_1/checkpoints/validation.pt"
+  LOAD_FROM: "\"~CONFIG/../results/vae_24_16_1/checkpoints/validation.pt\""
   SAVE: False
   LOAD: True
   LOAD_OPT: False
